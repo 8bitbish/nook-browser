@@ -221,9 +221,14 @@ extension PlatformPageView: NSViewRepresentable {
             undecidedX = x
             undecidedY = y
             stopMonitor()
+            monitorToken += 1
+            let token = monitorToken
             gestureMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
-                guard let self else { return event }
-                return MainActor.assumeIsolated { self.capture(event) } ? nil : event
+                MainActor.assumeIsolated {
+                    // A monitor being retired lets everything through until it is removed.
+                    guard let self, self.monitorToken == token else { return event }
+                    return self.capture(event) ? nil : event
+                }
             }
         }
 
@@ -252,9 +257,9 @@ extension PlatformPageView: NSViewRepresentable {
                     _ = swipe.step(amount(for: travelX), .began)
                     return true
                 }
-                // Not a swipe: what was held back goes on as ordinary scrolling.
+                // Not a swipe: the rest goes on as ordinary scrolling. The few points held back
+                // are dropped rather than replayed from inside the monitor.
                 stopMonitor()
-                events.dropLast().forEach { super.scrollWheel(with: $0) }
                 return false
             case .ended, .cancelled:
                 stopMonitor()
@@ -266,9 +271,7 @@ extension PlatformPageView: NSViewRepresentable {
                     return true
                 }
                 // Barely moved: an accidental touch, not a swipe.
-                let events = undecided
                 undecided = []
-                events.forEach { super.scrollWheel(with: $0) }
                 return false
             case .began:
                 // A new gesture before this one ended: it starts over from the pager.
@@ -281,10 +284,20 @@ extension PlatformPageView: NSViewRepresentable {
             }
         }
 
+        /// Retires the gesture monitor. It is switched off at once (its token goes stale) and
+        /// removed on the next turn: this often runs inside the monitor's own handler, and
+        /// removing a monitor while AppKit runs its monitors raised an exception that AppKit
+        /// swallowed mid-way through a Swift frame, leaving the main actor's executor state
+        /// corrupt until SwiftUI next checked it (a crash on scroll, 19:39 on 8cf339b7).
         private func stopMonitor() {
-            if let gestureMonitor { NSEvent.removeMonitor(gestureMonitor) }
+            monitorToken += 1
+            guard let monitor = gestureMonitor else { return }
             gestureMonitor = nil
+            DispatchQueue.main.async { NSEvent.removeMonitor(monitor) }
         }
+
+        /// Identifies the live gesture monitor; a handler with an older token passes events on.
+        private var monitorToken = 0
 
         /// The fingers' movement in points, x positive to the right, whichever way the
         /// scrolling direction setting points: right drags the page toward the previous space.

@@ -307,9 +307,15 @@ public final class PageSession: NSObject, Identifiable {
 
     private func extensionPageConfiguration() -> WKWebViewConfiguration? {
         guard isExtensionPageURL,
-              let context = controller?.tabEvents?.nativeController?.extensionContext(for: url)
+              let context = controller?.tabEvents?.nativeController?.extensionContext(for: url),
+              let configuration = context.webViewConfiguration
         else { return nil }
-        return context.webViewConfiguration
+        // A content controller of its own, so the handlers this session registers can never meet
+        // another page's: a second NordPass tab hit a name already registered and WebKit's
+        // exception took Nook down (19:42 on 8cf339b7). Extension pages get no content scripts,
+        // and their extension API, messaging and storage work without the context's controller.
+        configuration.userContentController = WKUserContentController()
+        return configuration
     }
 
     private func setupWebView() {
