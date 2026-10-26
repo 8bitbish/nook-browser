@@ -76,6 +76,7 @@ struct SidebarToggleButtons: View {
                 }
             }
         }
+        .font(NookDesign.Font.sidebarToggleIcon)
         .nookIconButtons()
         .fixedSize()
     }

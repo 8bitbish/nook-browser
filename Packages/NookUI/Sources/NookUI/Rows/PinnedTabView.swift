@@ -45,13 +45,13 @@ public struct PinnedTabView<Icon: View>: View {
     public var body: some View {
         Button(action: action) {
             ZStack {
-                NookDesign.Radius.shape(NookDesign.Radius.lg)
+                NookDesign.Radius.shape(NookDesign.Radius.row)
                     .fill(backgroundColor)
                     .animation(NookDesign.Motion.quick, value: isHovered)
 
+                // Arc draws a favorite the same whether its page is loaded or not.
                 tabIcon
                     .frame(height: NookDesign.Size.essentialsFavicon)
-                    .opacity(isUnloaded ? NookDesign.Surface.unloadedOpacity : 1)
             }
             .overlay(alignment: .topTrailing) {
                 if hasLeftPinnedURL && isHovered {
@@ -70,8 +70,8 @@ public struct PinnedTabView<Icon: View>: View {
             .frame(maxWidth: .infinity)
             .frame(height: NookDesign.Size.essentialsTile)
             .frame(minWidth: NookDesign.Size.essentialsTile)
-            .contentShape(NookDesign.Radius.shape(NookDesign.Radius.lg))
-            .nookRowSelection(isActive, radius: NookDesign.Radius.lg)
+            .contentShape(NookDesign.Radius.shape(NookDesign.Radius.row))
+            .nookRowSelection(isActive, radius: NookDesign.Radius.row)
             .nookElevation(isActive ? .raised : .flat)
         }
         .buttonStyle(.plain)
@@ -83,6 +83,7 @@ public struct PinnedTabView<Icon: View>: View {
     //MARK: - Colors
     /// Clear when selected: `nookRowSelection` draws the raised surface.
     private var backgroundColor: Color {
-        isActive ? .clear : (isHovered ? NookDesign.Surface.fillPressed : NookDesign.Surface.fill)
+        // Arc's idle tile is the same translucent fill as its URL bar; hover adds a step.
+        isActive ? .clear : (isHovered ? NookDesign.Surface.fillPressed : NookDesign.Surface.chromeFill)
     }
 }

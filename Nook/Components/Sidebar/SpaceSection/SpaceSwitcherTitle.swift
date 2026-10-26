@@ -55,15 +55,17 @@ struct SpaceSwitcherTitle: View {
 
     private func label(_ space: SpaceRecord) -> some View {
         let isDropTarget = dragSession.isDragging && dragSession.activeZone == .target(.pinned(spaceID: space.id))
-        let title = HStack(spacing: NookDesign.Spacing.xs) {
-            if space.isAgent {
-                Image(systemName: "sparkles").foregroundStyle(NookDesign.Surface.agentGradient)
+        // As in Arc: the space's icon in the favicon column, the name in the title column, dimmer
+        // than the rows under it.
+        let title = HStack(spacing: NookDesign.Spacing.rowIconGap) {
+            if SpaceIcon.exists(for: space) {
+                SpaceIcon(space: space, font: NookDesign.Font.spaceHeadingIcon)
+                    .frame(width: NookDesign.Size.favicon)
             }
             Text(space.name)
+                .foregroundStyle(.secondary)
+                .font(NookDesign.Font.spaceHeading)
         }
-            // Dimmer than the rows under it, as in Arc: a heading, not a tab.
-            .foregroundStyle(.secondary)
-            .font(NookDesign.Font.rowHeading)
             .lineLimit(1)
             .fixedSize()
         // A name too long for the sidebar fades out, the way a tab row's title does.
@@ -77,10 +79,10 @@ struct SpaceSwitcherTitle: View {
         .padding(.horizontal, NookDesign.Spacing.rowPadding)
         .frame(height: NookDesign.Size.row)
         .background(
-            NookDesign.Radius.shape(NookDesign.Radius.md)
+            NookDesign.Radius.shape(NookDesign.Radius.row)
                 .fill(isHovering || isDropTarget ? NookDesign.Surface.fill : Color.clear)
         )
-        .contentShape(NookDesign.Radius.shape(NookDesign.Radius.md))
+        .contentShape(NookDesign.Radius.shape(NookDesign.Radius.row))
         .onHoverTracking { isHovering = $0 }
     }
 

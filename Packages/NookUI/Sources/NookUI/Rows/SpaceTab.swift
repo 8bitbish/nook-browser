@@ -69,7 +69,7 @@ public struct SpaceTab: View {
                 tabs.select(item.id, in: windowState)
             }
         }) {
-            HStack(spacing: NookDesign.Spacing.md) {
+            HStack(spacing: NookDesign.Spacing.rowIconGap) {
                 if hasChildren { trailChevron }
                 ItemFavicon(item: item, session: session)
                     .frame(width: NookDesign.Size.favicon, height: NookDesign.Size.favicon)
@@ -99,7 +99,7 @@ public struct SpaceTab: View {
                 if isRenaming {
                     TextField("", text: $draftName)
                         .font(NookDesign.Font.rowTitle)
-                        .foregroundStyle(isUnloaded ? .secondary : .primary)
+                        .foregroundStyle(.primary)
                         .textFieldStyle(.plain)
                         .onSubmit { commitRename() }
                         .onEscapeKey { renameState.itemID = nil }
@@ -176,13 +176,13 @@ public struct SpaceTab: View {
             .background(backgroundColor)
             .overlay {
                 if isRenaming {
-                    NookDesign.Radius.shape(NookDesign.Radius.md)
+                    NookDesign.Radius.shape(NookDesign.Radius.row)
                         .strokeBorder(accentColor, lineWidth: NookDesign.Size.hairlineWidth)
                 }
             }
-            .clipShape(NookDesign.Radius.shape(NookDesign.Radius.md))
+            .clipShape(NookDesign.Radius.shape(NookDesign.Radius.row))
+            // Arc draws a tab the same whether its page is loaded or not.
             .nookRowSelection(isCurrentTab)
-            .opacity(isUnloaded ? NookDesign.Surface.unloadedOpacity : 1)
         }
         .buttonStyle(PlainButtonStyle())
         .onHoverTracking { hovering in

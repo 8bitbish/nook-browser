@@ -44,11 +44,14 @@ public struct SpaceSeparator: View {
                         / NookDesign.Motion.wavePeriod * 2 * .pi
                 )
                 .stroke(
-                    isWaving ? Color.accentColor : NookDesign.Surface.hairline,
-                    style: StrokeStyle(lineWidth: NookDesign.Size.hairlineWidth, lineCap: .round)
+                    isWaving ? Color.accentColor : NookDesign.Surface.separator,
+                    style: StrokeStyle(lineWidth: isWaving ? NookDesign.Size.hairlineWidth : NookDesign.Size.separatorWidth, lineCap: .round)
                 )
             }
-            .padding(.horizontal, NookDesign.Spacing.md)
+            // Arc's rule starts at the title column and stops short of the edge. The caller already
+            // insets this view by `Spacing.md`.
+            .padding(.leading, NookDesign.Spacing.rowPadding + NookDesign.Size.favicon + NookDesign.Spacing.rowIconGap - NookDesign.Spacing.md)
+            .padding(.trailing, NookDesign.Spacing.lg)
             .animation(NookDesign.Motion.settle, value: isWaving)
             .animation(NookDesign.Motion.quick, value: isHovering)
 

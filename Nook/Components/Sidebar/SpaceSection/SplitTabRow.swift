@@ -30,7 +30,7 @@ struct SplitTabRow: View {
             SplitHalfTab(item: right, zoneID: zoneID)
         }
         .frame(height: NookDesign.Size.row)
-        .clipShape(NookDesign.Radius.shape(NookDesign.Radius.md))
+        .clipShape(NookDesign.Radius.shape(NookDesign.Radius.row))
         .nookRowSelection(isActive)
         .nookElevation(isActive ? .raised : .flat)
     }

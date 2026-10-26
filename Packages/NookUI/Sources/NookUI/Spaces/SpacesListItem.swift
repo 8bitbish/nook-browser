@@ -27,7 +27,8 @@ struct SpacesListItem: View {
     private let dotSize: CGFloat = NookDesign.Spacing.sm
     private let activeDotSize: CGFloat = NookDesign.Spacing.md
     // A tight hit target so the 28pt default icon-button padding doesn't push the dots apart.
-    private let buttonSize: CGFloat = NookDesign.Spacing.xl
+    // Icons get a full button: with the list's 2pt gap they sit Arc's 34pt apart.
+    private var buttonSize: CGFloat { SpaceIcon.exists(for: space) ? NookDesign.Size.iconButton + NookDesign.Spacing.xs : NookDesign.Spacing.xl }
 
     init(
         space: SpaceRecord,
@@ -72,12 +73,16 @@ struct SpacesListItem: View {
 
     // MARK: - Dot
 
+    /// The space's icon, as Arc shows it: in colour for the space on screen, greyed for the
+    /// rest. A space without one keeps the accent dot.
     @ViewBuilder
     private var spaceDot: some View {
-        if space.isAgent {
-            Image(systemName: "sparkles")
-                .font(.system(size: NookDesign.Size.spaceIcon, weight: .semibold))
-                .foregroundStyle(NookDesign.Surface.agentGradient)
+        if SpaceIcon.exists(for: space) {
+            SpaceIcon(space: space, font: NookDesign.Font.spaceSwitcherIcon)
+                .foregroundStyle(isActive ? .primary : .secondary)
+                .grayscale(isActive ? 0 : 1)
+                .opacity(isActive ? 1 : NookDesign.Surface.inactiveSpaceIconOpacity)
+                .animation(NookDesign.Motion.standard, value: isActive)
         } else {
             plainDot
         }

@@ -18,13 +18,14 @@ struct SidebarHistoryButtons: View {
     @Environment(BrowserWindowState.self) private var windowState
 
     var body: some View {
-        HStack(spacing: NookDesign.Spacing.xxs) {
-            Button("Go Back", systemImage: "chevron.backward", action: goBack)
+        // Arc's arrows, size and spacing.
+        HStack(spacing: NookDesign.Spacing.navButtonGap) {
+            Button("Go Back", systemImage: "arrow.left", action: goBack)
                 .disabled(!canGoBack)
                 .contextMenu {
                     NavigationHistoryContextMenu(historyType: .back, windowState: windowState)
                 }
-            Button("Go Forward", systemImage: "chevron.forward", action: goForward)
+            Button("Go Forward", systemImage: "arrow.right", action: goForward)
                 .disabled(!canGoForward)
                 .contextMenu {
                     NavigationHistoryContextMenu(historyType: .forward, windowState: windowState)
@@ -34,6 +35,7 @@ struct SidebarHistoryButtons: View {
                     .contentTransition(.symbolEffect(.replace))
             }
         }
+        .font(NookDesign.Font.navIcon)
         .nookIconButtons()
     }
 

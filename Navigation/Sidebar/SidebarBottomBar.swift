@@ -40,7 +40,8 @@ struct SidebarBottomBar: View {
             }
         }
         .frame(height: NookDesign.Size.bottomBar)
-        .padding(.horizontal, NookDesign.Spacing.sidebarInset)
+        // Arc's library and + buttons sit 2pt further in than the rows' inset.
+        .padding(.horizontal, NookDesign.Spacing.sidebarInset + NookDesign.Spacing.xxs)
     }
     
     private var menuButton: some View {
@@ -96,6 +97,7 @@ struct SidebarBottomBar: View {
             }
         } label:{
             Label("Actions", systemImage: "plus")
+                .font(NookDesign.Font.addButton)
         }
         .menuStyle(.button)
         .nookIconButtons()

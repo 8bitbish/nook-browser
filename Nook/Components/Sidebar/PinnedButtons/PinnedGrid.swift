@@ -86,7 +86,7 @@ struct PinnedGrid: View {
                     manager: dragSession,
                     onDrop: { id, position in tabs.dropOnFavorites(id, spaceID: spaceID, index: position.index) }
                 ) {
-                    LazyVGrid(columns: columns, alignment: .center, spacing: NookDesign.Spacing.sm) {
+                    LazyVGrid(columns: columns, alignment: .center, spacing: NookDesign.Spacing.tileRowGap) {
                         let insertionIdx = insertionIndex(in: zone, items: items)
 
                         ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
@@ -141,7 +141,7 @@ struct PinnedGrid: View {
         guard width > 0, itemCount > 0 else { return 1 }
         var cols = min(maxColumns, itemCount)
         while cols > 1 {
-            let needed = CGFloat(cols) * NookDesign.Size.essentialsTile + CGFloat(cols - 1) * NookDesign.Spacing.sm
+            let needed = CGFloat(cols) * NookDesign.Size.essentialsTile + CGFloat(cols - 1) * NookDesign.Spacing.tileColumnGap
             if needed <= width { break }
             cols -= 1
         }
@@ -152,7 +152,7 @@ struct PinnedGrid: View {
         Array(
             repeating: GridItem(
                 .flexible(minimum: NookDesign.Size.essentialsTile),
-                spacing: NookDesign.Spacing.sm,
+                spacing: NookDesign.Spacing.tileColumnGap,
                 alignment: .center
             ),
             count: count

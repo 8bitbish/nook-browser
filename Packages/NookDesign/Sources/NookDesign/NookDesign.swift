@@ -23,7 +23,8 @@ public enum NookDesign {
         public static let xs: CGFloat = 4      // favicon
         public static let sm: CGFloat = 6      // icon button, menu item, small chip
         public static let md: CGFloat = 8      // tab row, nav button, URL bar
-        public static let lg: CGFloat = 12     // essentials tile, card, settings group
+        public static let lg: CGFloat = 12     // card, settings group
+        public static let row: CGFloat = 10    // sidebar row, favorite tile, URL bar: Arc's corner
         public static let xl: CGFloat = 16     // dialog, toast
         public static let xxl: CGFloat = 24    // command palette
 
@@ -45,9 +46,14 @@ public enum NookDesign {
         public static let xxxl: CGFloat = 24
 
         public static let sidebarInset: CGFloat = 8
-        public static let rowGap: CGFloat = 4         // Arc's sidebar rows sit 41pt apart (36 + 5)
-        public static let sectionGap: CGFloat = 10
-        public static let rowPadding: CGFloat = 8
+        public static let rowGap: CGFloat = 5         // Arc's sidebar rows sit 41pt apart (36 + 5)
+        public static let sectionGap: CGFloat = 8       // URL bar to favorites to space heading, as in Arc
+        public static let rowPadding: CGFloat = 10      // row edge to favicon: Arc's 18pt from the sidebar edge
+        public static let rowIconGap: CGFloat = 10      // favicon to title: Arc's titles start 44pt in
+        public static let tileColumnGap: CGFloat = 9    // between favorite tiles, side by side
+        public static let tileRowGap: CGFloat = 8       // between favorite tile rows
+        public static let urlFieldPadding: CGFloat = 14 // URL bar edge to its text
+        public static let sidebarBottom: CGFloat = 6    // below the bottom bar: Arc's icons sit 25.5pt up
         #if os(iOS)
         // Depth 5 at 20 would eat 100 of a 390pt phone row.
         public static let folderIndent: CGFloat = 16
@@ -55,6 +61,9 @@ public enum NookDesign {
         public static let folderIndent: CGFloat = 20
         #endif
         public static let sidebarTop: CGFloat = 52     // the unified title band; the lights sit centred in it
+        public static let sidebarTopFullScreen: CGFloat = 46 // no lights in full screen: Arc's band, URL bar 46pt down
+        public static let fullScreenLeading: CGFloat = 15    // toggle row inset in full screen: Arc's toggle centre at 29pt
+        public static let navButtonGap: CGFloat = 6          // back, forward, reload sit 34pt apart in Arc
         public static let trafficLights: CGFloat = 88  // leading space the traffic lights take in the title row
         public static let titleFade: CGFloat = 20      // trailing fade on long row titles
     }
@@ -69,8 +78,8 @@ public enum NookDesign {
         #endif
         public static let iconButton: CGFloat = 28
         public static let favicon: CGFloat = 16
-        public static let essentialsTile: CGFloat = 46   // Arc's favorite tile height
-        public static let essentialsFavicon: CGFloat = 20
+        public static let essentialsTile: CGFloat = 47   // Arc's favorite tile height
+        public static let essentialsFavicon: CGFloat = 16 // Arc draws favicons in tiles at row size
         public static let navRow: CGFloat = 28
         #if os(iOS)
         // The floating bar's control row. 50 clears the 44pt touch minimum with
@@ -84,6 +93,7 @@ public enum NookDesign {
         public static let rowButton: CGFloat = 20      // hover-only close/unload button in a row
         public static let cornerButton: CGFloat = 14   // button tucked into a tile corner, kept off the tile's centre
         public static let hairlineWidth: CGFloat = 1   // 1pt rule
+        public static let separatorWidth: CGFloat = 0.5 // the pinned/tabs rule: Arc's one device pixel
         public static let loadBar: CGFloat = 2         // page load progress along the top of Peek and the mini window
         public static let waveAmplitude: CGFloat = 3   // peak of the separator's working wave
         public static let waveLength: CGFloat = 56     // one full cycle of that wave
@@ -93,9 +103,9 @@ public enum NookDesign {
         public static let pipSkip: CGFloat = 48        // PiP skip buttons, as in the system PiP window
         public static let pipPlay: CGFloat = 64        // PiP play/pause, as in the system PiP window
         public static let pipScrub: CGFloat = 4        // PiP scrubber track
-        // Narrowest sidebar: the lights (88), the sidebar toggle (28), back/forward/reload (88),
+        // Narrowest sidebar: the lights (88), the sidebar toggle (28), back/forward/reload (96),
         // the inset (8). They share one row, as in Arc.
-        public static let sidebarMin: CGFloat = 212
+        public static let sidebarMin: CGFloat = 220
 
         // Settings
         public static let settingsChip: CGFloat = 22           // tinted icon chip in the settings sidebar
@@ -123,8 +133,16 @@ public enum NookDesign {
         public static let title = SwiftUI.Font.system(size: 15, weight: .semibold)       // palette input, toast title
         public static let label = SwiftUI.Font.system(size: 13, weight: .semibold)       // space name, folder name
         public static let body = SwiftUI.Font.system(size: 13, weight: .medium)          // menu item, settings row
-        public static let rowTitle = SwiftUI.Font.system(size: 14, weight: .medium)      // sidebar tab title, as in Arc
-        public static let rowHeading = SwiftUI.Font.system(size: 14, weight: .semibold)  // sidebar folder name, space heading
+        // Sidebar type, fitted glyph by glyph against an Arc capture (SF, 2x).
+        public static let rowTitle = SwiftUI.Font.system(size: 14, weight: .regular)     // tab title, New Tab
+        public static let rowHeading = SwiftUI.Font.system(size: 14, weight: .semibold)  // folder name
+        public static let spaceHeading = SwiftUI.Font.system(size: 13, weight: .semibold) // space name over its rows
+        public static let urlField = SwiftUI.Font.system(size: 13, weight: .regular)     // sidebar URL bar
+        public static let spaceHeadingIcon = SwiftUI.Font.system(size: 14)               // space emoji beside its name
+        public static let spaceSwitcherIcon = SwiftUI.Font.system(size: 12)              // space emoji in the bottom bar
+        public static let addButton = SwiftUI.Font.system(size: 17, weight: .regular)    // the bottom bar's +: Arc's 13.5pt glyph
+        public static let navIcon = SwiftUI.Font.system(size: 16, weight: .regular)      // back, forward, reload: Arc's 14.5pt arrows
+        public static let sidebarToggleIcon = SwiftUI.Font.system(size: 15, weight: .regular) // sidebar and AI toggles: Arc's 18pt toggle
         public static let bodyRegular = SwiftUI.Font.system(size: 13, weight: .regular)  // paragraphs, descriptions
         public static let secondary = SwiftUI.Font.system(size: 12, weight: .medium)     // URL bar, popup button
         public static let caption = SwiftUI.Font.system(size: 11, weight: .medium)       // counts, shortcuts, subtitles
@@ -156,7 +174,9 @@ public enum NookDesign {
         public static let tintOpacity: Double = 0.18                       // accent-tinted control: chosen chip, own chat message
         public static let mediaScrim = Color.black.opacity(0.35)           // controls over video
         public static let hairline = Color.primary.opacity(0.08)
+        public static let separator = Color.primary.opacity(0.17)       // the pinned/tabs rule, Arc's 17%
         public static let unloadedOpacity: Double = 0.55
+        public static let inactiveSpaceIconOpacity: Double = 0.6  // other spaces' icons in the bottom bar, greyed as in Arc
         public static let dropBorderIdle = Color.secondary.opacity(0.3)    // dashed empty-state drop target
         public static let dropBorderActive = Color.primary.opacity(0.4)    // dashed drop target while dragging
         /// Destructive action fill. Kept at the value the dialog buttons shipped with.
@@ -189,15 +209,21 @@ public enum NookDesign {
         public static let windowBackground = Color(nsColor: .windowBackgroundColor)
         public static let raised = Color(nsColor: .controlBackgroundColor) // active row, active tile
         /// A chosen row or tile. Light: the raised card. Dark: a translucent white over the space's
-        /// colour, as Arc draws it, where the opaque card read as a dark hole in the sidebar.
+        /// colour, as Arc draws it (measured 22%), where the opaque card read as a dark hole.
         public static let selection = Color(nsColor: NSColor(name: nil) { appearance in
             appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-                ? NSColor.white.withAlphaComponent(0.14) : .controlBackgroundColor
+                ? NSColor.white.withAlphaComponent(0.22) : .controlBackgroundColor
+        })
+        /// The URL bar and an idle favorite tile on the sidebar. Dark: Arc's 10% white.
+        public static let chromeFill = Color(nsColor: NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                ? NSColor.white.withAlphaComponent(0.10) : NSColor.labelColor.withAlphaComponent(0.045)
         })
         #else
         public static let windowBackground = Color(uiColor: .systemBackground)
         public static let raised = Color(uiColor: .secondarySystemBackground) // active row, active tile
         public static let selection = raised
+        public static let chromeFill = fill
         #endif
 
         /// Sidebar/window chrome fill: the space accent fading to the system window background.

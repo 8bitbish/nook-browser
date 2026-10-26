@@ -32,6 +32,12 @@ struct SpacesSideBarView: View {
 
     // Hover states
     @State private var isSidebarHovered: Bool = false
+    /// Full screen hides the traffic lights, so the title row takes Arc's shorter band.
+    @State private var isFullScreen = false
+
+    private var titleBand: CGFloat {
+        isFullScreen ? NookDesign.Spacing.sidebarTopFullScreen : NookDesign.Spacing.sidebarTop
+    }
     @State private var isMenuButtonHovered = false
     @State private var isDownloadsHovered = false
     @State private var showDownloadsMenu = false
@@ -137,17 +143,25 @@ struct SpacesSideBarView: View {
             .environmentObject(browserManager)
             .environment(windowState)
         }
-        // Extra top padding when sidebar is on the left to avoid overlapping native traffic light buttons
-        .padding(.top, nookSettings.sidebarPosition == .left ? NookDesign.Spacing.sidebarTop : NookDesign.Spacing.sidebarInset)
+        // Extra top padding when sidebar is on the left to avoid overlapping native traffic light buttons.
+        // Full screen has no lights, so the row takes Arc's band and starts at its inset.
+        .padding(.top, nookSettings.sidebarPosition == .left ? titleBand : NookDesign.Spacing.sidebarInset)
         .overlay(alignment: .topLeading) {
             if nookSettings.sidebarPosition == .left {
                 titleRow
-                    .frame(height: NookDesign.Spacing.sidebarTop)
-                    .padding(.leading, NookDesign.Spacing.trafficLights)
+                    .frame(height: titleBand)
+                    .padding(.leading, isFullScreen ? NookDesign.Spacing.fullScreenLeading : NookDesign.Spacing.trafficLights)
                     .padding(.trailing, NookDesign.Spacing.sidebarInset)
             }
         }
-        .padding(.bottom, NookDesign.Spacing.sidebarInset)
+        .padding(.bottom, NookDesign.Spacing.sidebarBottom)
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.willEnterFullScreenNotification)) { note in
+            if note.object as? NSWindow === windowState.window { isFullScreen = true }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didExitFullScreenNotification)) { note in
+            if note.object as? NSWindow === windowState.window { isFullScreen = false }
+        }
+        .onAppear { isFullScreen = windowState.window?.styleMask.contains(.fullScreen) ?? false }
         .background(
             GeometryReader { geo in
                 Color.clear
@@ -397,6 +411,8 @@ struct SpacesSideBarView: View {
                 .environment(nookSettings)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, NookDesign.Spacing.sidebarInset)
+                // A row like the ones under it, so it keeps their pitch.
+                .padding(.bottom, NookDesign.Spacing.rowGap)
 
             SpaceView(
                 spaceID: space.id,

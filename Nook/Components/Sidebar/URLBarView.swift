@@ -36,14 +36,10 @@ struct URLBarView: View {
                                 }
                                 // Two texts so a narrow sidebar cuts the path first and then the
                                 // host's head: `accounts.google.com.x.evil.tld` must keep `evil.tld`.
-                                HStack(spacing: 0) {
-                                    Text(displayHost(for: session)).foregroundStyle(.primary)
-                                        .truncationMode(.head)
-                                        .layoutPriority(1)
-                                    Text(displayPath(for: session)).foregroundStyle(.tertiary)
-                                        .truncationMode(.tail)
-                                }
-                                .font(NookDesign.Font.secondary)
+                                // Host only, as in Arc; the full address is a click away.
+                                Text(displayHost(for: session)).foregroundStyle(.secondary)
+                                    .truncationMode(.head)
+                                .font(NookDesign.Font.urlField)
                                 .lineLimit(1)
                                 if let errors = devErrorCount(for: session) {
                                     Button {
@@ -65,7 +61,7 @@ struct URLBarView: View {
                                     .font(.system(size: NookDesign.Size.rowGlyph, weight: .medium))
                                     .foregroundStyle(textColor)
                                 Text("Search or Enter URL...")
-                                    .font(NookDesign.Font.secondary)
+                                    .font(NookDesign.Font.urlField)
                                     .foregroundStyle(textColor)
                             }
                         }
@@ -90,8 +86,10 @@ struct URLBarView: View {
                         .contentTransition(.symbolEffect(.replace))
                     }
 
-                    // Pinned extension buttons + library button
-                    if let extensionManager = browserManager.extensionManager {
+                    // Pinned extension buttons + library button. On hover, as in Arc, whose bar shows
+                    // only the host; kept while the library is open so its card keeps an anchor.
+                    if isHovering || windowState.isExtensionLibraryVisible,
+                       let extensionManager = browserManager.extensionManager {
                         let pinnedIDs = browserManager.nookSettings?.pinnedExtensionIDs ?? []
                         let pinnedExtensions = extensionManager.installedExtensions.filter { pinnedIDs.contains($0.id) }
 
@@ -110,14 +108,15 @@ struct URLBarView: View {
                             }
                     }
                 }
-                .padding(.horizontal, NookDesign.Spacing.rowPadding)
+                .padding(.leading, NookDesign.Spacing.urlFieldPadding)
+                .padding(.trailing, NookDesign.Spacing.xs)
         }
         .frame(maxWidth: .infinity, minHeight: NookDesign.Size.chromeControl, maxHeight: NookDesign.Size.chromeControl)
         .overlay(alignment: .bottom) {
             PageLoadingProgressBar(session: session)
         }
-        .clipShape(NookDesign.Radius.shape(NookDesign.Radius.md))
-        .nookControlSurface(in: NookDesign.Radius.shape(NookDesign.Radius.md))
+        .clipShape(NookDesign.Radius.shape(NookDesign.Radius.row))
+        .background(NookDesign.Radius.shape(NookDesign.Radius.row).fill(NookDesign.Surface.chromeFill))
         // Report the frame in the window space so we can overlay the mini palette above all content
         .background(
             GeometryReader { proxy in

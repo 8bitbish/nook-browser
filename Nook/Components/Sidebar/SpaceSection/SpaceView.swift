@@ -64,7 +64,8 @@ struct SpaceView: View {
                         .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .top)))
                 }
 
-                VStack(spacing: NookDesign.Spacing.sectionGap) {
+                // New Tab sits in the row rhythm of the tabs under it, as in Arc.
+                VStack(spacing: NookDesign.Spacing.rowGap) {
                     separatorAndNewTab(regular: regular)
                     sectionList(.tabs(spaceID: spaceID), rows: regular, split: split, showsTail: true)
                 }
@@ -140,10 +141,10 @@ struct SpaceView: View {
     }
 
     private func emptySectionSlot(isActive: Bool) -> some View {
-        NookDesign.Radius.shape(NookDesign.Radius.md)
+        NookDesign.Radius.shape(NookDesign.Radius.row)
             .strokeBorder(style: StrokeStyle(lineWidth: NookDesign.Size.hairlineWidth, dash: [NookDesign.Spacing.sm, NookDesign.Spacing.xs]))
             .foregroundStyle(isActive ? NookDesign.Surface.dropBorderActive : NookDesign.Surface.dropBorderIdle)
-            .background(NookDesign.Radius.shape(NookDesign.Radius.md).fill(isActive ? NookDesign.Surface.fillPressed : Color.clear))
+            .background(NookDesign.Radius.shape(NookDesign.Radius.row).fill(isActive ? NookDesign.Surface.fillPressed : Color.clear))
             .frame(height: NookDesign.Size.row)
             .animation(NookDesign.Motion.quick, value: isActive)
     }
@@ -208,7 +209,8 @@ struct SpaceView: View {
 
     private func separatorAndNewTab(regular: [Row]) -> some View {
         let looseTabs = regular.filter { $0.depth == 0 && !$0.item.isFolder }.map(\.item.id)
-        return VStack(spacing: NookDesign.Spacing.xs) {
+        // Arc leaves about 15pt either side of the line.
+        return VStack(spacing: NookDesign.Spacing.md) {
             SpaceSeparator(
                 isHovering: $isSidebarHovered,
                 // Clear empties the section: a tab goes with its whole trail.
@@ -231,9 +233,10 @@ struct SpaceView: View {
         Button {
             commandPalette.open()
         } label: {
-            HStack(spacing: NookDesign.Spacing.md) {
+            HStack(spacing: NookDesign.Spacing.rowIconGap) {
                 Image(systemName: "plus")
-                    .font(.system(size: NookDesign.Size.favicon, weight: .medium))
+                    .font(.system(size: NookDesign.Size.favicon, weight: .regular))
+                    .frame(width: NookDesign.Size.favicon)
                 Text("New Tab")
                     .font(NookDesign.Font.rowTitle)
                 Spacer(minLength: 0)
@@ -248,8 +251,8 @@ struct SpaceView: View {
             .frame(height: NookDesign.Size.row)
             .frame(maxWidth: .infinity)
             .background(isNewTabHovering ? NookDesign.Surface.fill : Color.clear)
-            .clipShape(NookDesign.Radius.shape(NookDesign.Radius.md))
-            .contentShape(NookDesign.Radius.shape(NookDesign.Radius.md))
+            .clipShape(NookDesign.Radius.shape(NookDesign.Radius.row))
+            .contentShape(NookDesign.Radius.shape(NookDesign.Radius.row))
         }
         .buttonStyle(.plain)
         .onHoverTracking { hovering in

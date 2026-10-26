@@ -25,7 +25,7 @@ public extension View {
 
     /// The selected sidebar row or pinned tile. Branch-free so view identity is stable and the
     /// change animates; the row applies its own `.raised` elevation.
-    func nookRowSelection(_ isSelected: Bool, radius: CGFloat = NookDesign.Radius.md) -> some View {
+    func nookRowSelection(_ isSelected: Bool, radius: CGFloat = NookDesign.Radius.row) -> some View {
         let shape = NookDesign.Radius.shape(radius)
         return background(shape.fill(isSelected ? NookDesign.Surface.selection : .clear))
             .overlay(shape.strokeBorder(NookDesign.Surface.hairline.opacity(isSelected ? 1 : 0), lineWidth: NookDesign.Size.hairlineWidth))

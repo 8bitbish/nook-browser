@@ -45,16 +45,12 @@ public struct TabFolderView: View {
                 tabs.toggleFolder(item.id)
             }
         }) {
-            HStack(spacing: NookDesign.Spacing.md) {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: NookDesign.Size.rowGlyph - 1, weight: .semibold))
-                    .foregroundStyle(.tertiary)
-                    .rotationEffect(.degrees(isOpen ? 90 : 0))
-                    .animation(NookDesign.Motion.standard, value: isOpen)
-
+            // As in Arc: no chevron, the folder glyph in the favicon column says open or shut.
+            HStack(spacing: NookDesign.Spacing.rowIconGap) {
                 Image(systemName: liveSymbol ?? (isOpen ? "folder.fill" : "folder"))
-                    .font(.system(size: NookDesign.Size.spaceIcon, weight: .medium))
-                    .foregroundStyle(tabs.space(spaceID)?.accentColor ?? .secondary)
+                    .font(.system(size: NookDesign.Size.favicon, weight: .regular))
+                    .foregroundStyle(.primary)
+                    .frame(width: NookDesign.Size.favicon)
 
                 if isRenaming {
                     TextField("", text: $draftName)
@@ -86,12 +82,6 @@ public struct TabFolderView: View {
                         .help(liveStatusHelp(status))
                 }
 
-                if !isHovering {
-                    Text("\(tabs.children(of: .folder(itemID: item.id)).count)")
-                        .font(NookDesign.Font.caption)
-                        .foregroundStyle(.tertiary)
-                }
-
                 if isHovering && !isRenaming {
                     Menu {
                         folderMenu
@@ -105,13 +95,13 @@ public struct TabFolderView: View {
             .frame(height: NookDesign.Size.row)
             .frame(maxWidth: .infinity)
             .background(
-                NookDesign.Radius.shape(NookDesign.Radius.md)
+                NookDesign.Radius.shape(NookDesign.Radius.row)
                     .fill(isDropTarget ? NookDesign.Surface.fillPressed : (isHovering ? NookDesign.Surface.fill : Color.clear))
             )
-            .clipShape(NookDesign.Radius.shape(NookDesign.Radius.md))
+            .clipShape(NookDesign.Radius.shape(NookDesign.Radius.row))
         }
         .buttonStyle(PlainButtonStyle())
-        .contentShape(NookDesign.Radius.shape(NookDesign.Radius.md))
+        .contentShape(NookDesign.Radius.shape(NookDesign.Radius.row))
         .onHoverTracking { hovering in
             withAnimation(NookDesign.Motion.quick) {
                 isHovering = hovering
