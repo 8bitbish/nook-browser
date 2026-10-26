@@ -143,6 +143,7 @@ struct NookApp: App {
     private func setupApplicationLifecycle() {
         // Connect AppDelegate for termination and updates
         appDelegate.browserManager = browserManager
+        NookScripting.browserManager = browserManager
         appDelegate.windowRegistry = windowRegistry
         appDelegate.mcpManager = mcpManager
         appDelegate.drainPendingURLs()

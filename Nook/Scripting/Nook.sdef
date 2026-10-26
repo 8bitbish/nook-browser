@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE dictionary SYSTEM "file://localhost/System/Library/DTDs/sdef.dtd">
+<!-- Personal build: read-only AppleScript access to windows and tabs.
+     tell application "Nook" to get {title, URL} of active tab of front window -->
+<dictionary title="Nook Terminology" xmlns:xi="http://www.w3.org/2003/XInclude">
+    <xi:include href="file:///System/Library/ScriptingDefinitions/CocoaStandard.sdef" xpointer="xpointer(/dictionary/suite)"/>
+
+    <suite name="Nook Suite" code="NkSt" description="Nook windows and tabs.">
+        <class-extension extends="window" description="A Nook browser window.">
+            <element type="tab" access="r" description="The tabs in the window's space, in sidebar order.">
+                <cocoa key="nookScriptTabs"/>
+            </element>
+            <property name="active tab" code="NkAt" type="tab" access="r" description="The tab the window is showing.">
+                <cocoa key="nookScriptActiveTab"/>
+            </property>
+        </class-extension>
+
+        <class name="tab" code="NkTb" plural="tabs" description="A tab.">
+            <cocoa class="NookScriptTab"/>
+            <property name="id" code="ID  " type="text" access="r" description="The tab's unique identifier.">
+                <cocoa key="uniqueID"/>
+            </property>
+            <property name="title" code="NkTi" type="text" access="r" description="The page title.">
+                <cocoa key="title"/>
+            </property>
+            <property name="URL" code="pURL" type="text" access="r" description="The page address.">
+                <cocoa key="urlString"/>
+            </property>
+            <property name="loading" code="NkLd" type="boolean" access="r" description="Whether the page is loading.">
+                <cocoa key="isLoading"/>
+            </property>
+        </class>
+    </suite>
+</dictionary>
