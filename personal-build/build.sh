@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build a signed Release Nook.app for this Mac (Apple Silicon) into personal-build/out/Nook.app.
+# Build a signed Release Nook.app for this Mac (Apple Silicon) into personal-build/out.noindex/Nook.app.
 # Follows CLAUDE.md's "Release build you can install and use", with the personal signing identity:
 # coverage off, reduced entitlements (absolute path), no injected get-task-allow.
 set -euo pipefail
@@ -7,7 +7,7 @@ cd "$(dirname "$0")/.."
 source personal-build/env.sh
 
 derived="$PWD/build-release"
-out="$PWD/personal-build/out"
+out="$PWD/personal-build/out.noindex"
 
 identities=$(security find-identity -v -p codesigning)
 grep -qF "\"$NOOK_PERSONAL_SIGNING_IDENTITY\"" <<<"$identities" ||

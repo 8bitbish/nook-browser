@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install personal-build/out/Nook.app over /Applications/Nook.app, keeping Jake's data.
+# Install personal-build/out.noindex/Nook.app over /Applications/Nook.app, keeping Jake's data.
 # Same bundle id (com.gstudios.nook), so the new app reads the same Application Support,
 # WebKit data and defaults. Backs those up first and keeps the previous app for rollback.
 #   install.sh           refuses while Nook is running
@@ -8,7 +8,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 source personal-build/env.sh
 
-new="$PWD/personal-build/out/Nook.app"
+new="$PWD/personal-build/out.noindex/Nook.app"
 target=/Applications/Nook.app
 backups="$HOME/Backups/nook"
 stamp=$(date +%Y-%m-%d_%H%M%S)
