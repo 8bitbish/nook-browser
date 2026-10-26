@@ -126,42 +126,10 @@ struct ExtensionActionButton: View {
         badgeText = action?.badgeText
     }
     
-    private static let logger = Logger(subsystem: "com.nook.browser", category: "ExtensionAction")
-
     private func showExtensionPopup() {
-        Self.logger.notice("Action tapped for '\(self.ext.name, privacy: .public)' id=\(self.ext.id, privacy: .public)")
-
-        guard let extensionContext = ExtensionManager.shared.getExtensionContext(for: ext.id) else {
-            Self.logger.error("No extension context for id=\(self.ext.id, privacy: .public). Available: \(ExtensionManager.shared.loadedContextIDs.joined(separator: ", "), privacy: .public)")
-            return
-        }
-
-        let session = currentSession
-        let adapter = ExtensionManager.shared.actionAdapter(in: windowState)
-
         // No permission grants here: required permissions were granted at load, site access
         // follows the extension's approved patterns, and activeTab is granted by WebKit on click.
-
-        let perform = {
-            Self.logger.notice("Calling performAction (tab=\(session?.title ?? "nil", privacy: .public), adapter=\(adapter != nil ? "yes" : "nil", privacy: .public))")
-            ExtensionManager.shared.performAction(extensionContext, for: adapter)
-        }
-        guard extensionContext.webExtension.hasBackgroundContent else { return perform() }
-
-        // Wait for the background page so the popup does not spin, but never more than 1.5 s:
-        // a background load that fails can leave WebKit's wake callback uncalled, and the click
-        // then did nothing at all.
-        var performed = false
-        let performOnce = { (reason: String) in
-            guard !performed else { return }
-            performed = true
-            if reason != "ready" { Self.logger.notice("Opening popup without background page: \(reason, privacy: .public)") }
-            perform()
-        }
-        extensionContext.loadBackgroundContent { error in
-            DispatchQueue.main.async { performOnce(error.map { "wake failed: \($0.localizedDescription)" } ?? "ready") }
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { performOnce("wake timed out") }
+        ExtensionManager.shared.clickAction(extensionId: ext.id, in: windowState, from: "Toolbar")
     }
 }
 
@@ -170,7 +138,7 @@ struct ExtensionActionButton: View {
 }
 
 // MARK: - Anchor View for Popover Positioning
-private struct ActionAnchorView: NSViewRepresentable {
+struct ActionAnchorView: NSViewRepresentable {
     let extensionId: String
 
     func makeNSView(context: Context) -> NSView {

@@ -878,6 +878,7 @@ extension ExtensionManager {
             Self.logger.info("All extensions loaded — signaling ready")
             self.extensionsLoaded = true
             self.checkForExtensionUpdatesIfDue()
+            self.runClickDriverIfRequested()
         }
     }
 

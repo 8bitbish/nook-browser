@@ -73,7 +73,10 @@ extension ExtensionManager {
         // Present the popover on main thread
         let popupWebView = action.popupWebView
         DispatchQueue.main.async {
+            // A browser window when Nook is not the active app, which has no key or main window.
             let targetWindow = NSApp.keyWindow ?? NSApp.mainWindow
+                ?? self.browserManagerRef?.windowRegistry?.activeWindow?.window
+                ?? self.browserManagerRef?.windowRegistry?.allWindows.lazy.compactMap(\.window).first
 
             popover.behavior = .transient
             popover.delegate = self
@@ -314,14 +317,18 @@ extension ExtensionManager {
         completionHandler:
             @escaping ((any WKWebExtensionTab)?, (any Error)?) -> Void
     ) {
+        let extName = extensionContext.webExtension.displayName ?? "?"
+        Self.logger.notice("'\(extName, privacy: .public)' asks to open a tab: \(configuration.url?.absoluteString ?? "nil", privacy: .public)")
         guard let bm = browserManagerRef, let window = targetWindow(configuration.window),
               let spaceID = window.spaceID
         else {
+            Self.logger.error("'\(extName, privacy: .public)' tab refused: no window")
             completionHandler(nil, Self.noWindowError())
             return
         }
         let url = configuration.url ?? TabsController.homeURL
         guard Self.extensionMayOpen(url, for: extensionContext) else {
+            Self.logger.error("'\(extName, privacy: .public)' tab refused: URL not allowed")
             completionHandler(nil, Self.disallowedURLError(url))
             return
         }
@@ -334,7 +341,7 @@ extension ExtensionManager {
             return
         }
         if configuration.shouldBeMuted { bm.tabs.session(for: itemID)?.setMuted(true) }
-        Self.logger.info("Extension opened tab \(url.absoluteString, privacy: .public)")
+        Self.logger.notice("Extension opened tab \(url.absoluteString, privacy: .public)")
         completionHandler(adapter(for: itemID), nil)
     }
 

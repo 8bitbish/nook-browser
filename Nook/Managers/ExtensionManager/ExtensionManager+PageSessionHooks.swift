@@ -47,6 +47,33 @@ extension ExtensionManager {
         return browserManagerRef?.tabs.selectedSession(in: window).flatMap { adapter(for: $0.itemID) }
     }
 
+    /// A click on an extension's toolbar or library button. Waits for the background so a popup
+    /// does not spin, but never more than 1.5 s: a background load that fails can leave WebKit's
+    /// wake callback uncalled, and the click then did nothing at all.
+    func clickAction(extensionId: String, in window: BrowserWindowState, from source: String) {
+        guard let context = getExtensionContext(for: extensionId) else {
+            Self.logger.error("\(source, privacy: .public) click: no context for \(extensionId, privacy: .public)")
+            return
+        }
+        let name = context.webExtension.displayName ?? extensionId
+        let adapter = actionAdapter(in: window)
+        let presentsPopup = context.action(for: adapter)?.presentsPopup ?? false
+        Self.logger.notice("\(source, privacy: .public) click: '\(name, privacy: .public)' popup=\(presentsPopup, privacy: .public) tab=\(adapter != nil, privacy: .public)")
+        guard context.webExtension.hasBackgroundContent else { return performAction(context, for: adapter) }
+
+        var performed = false
+        let performOnce = { [weak self] (reason: String) in
+            guard !performed else { return }
+            performed = true
+            if reason != "ready" { Self.logger.notice("'\(name, privacy: .public)' clicked without its background: \(reason, privacy: .public)") }
+            self?.performAction(context, for: adapter)
+        }
+        context.loadBackgroundContent { error in
+            DispatchQueue.main.async { performOnce(error.map { "wake failed: \($0.localizedDescription)" } ?? "ready") }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { performOnce("wake timed out") }
+    }
+
     /// Clicks an extension's action. WebKit ignores every click while it believes a popup is
     /// open, so a popover it still holds but no longer shows is closed first. Reading
     /// `popupPopover` would build and load a new popup, hence the weak reference.

@@ -377,6 +377,8 @@ private struct ExtensionGridItem: View {
                     }
                     .frame(width: 34, height: 34)
                     .background(NookDesign.Surface.fill)
+                    // The popup hangs off the icon that was clicked.
+                    .background(ActionAnchorView(extensionId: ext.id))
                     .clipShape(NookDesign.Radius.shape(NookDesign.Radius.md))
 
                     if let badge = badgeText, !badge.isEmpty {
@@ -434,16 +436,7 @@ private struct ExtensionGridItem: View {
     }
 
     private func triggerExtensionAction() {
-        guard let ctx = ExtensionManager.shared.getExtensionContext(for: ext.id) else { return }
-
-        if ctx.webExtension.hasBackgroundContent {
-            ctx.loadBackgroundContent { error in
-                if let error { Logger(subsystem: "com.nook.browser", category: "ExtensionLibrary").error("Background wake failed: \(error.localizedDescription, privacy: .public)") }
-            }
-        }
-
-        let adapter = ExtensionManager.shared.actionAdapter(in: windowState)
-        ExtensionManager.shared.performAction(ctx, for: adapter)
+        ExtensionManager.shared.clickAction(extensionId: ext.id, in: windowState, from: "Library")
     }
 
     private func refreshBadge() {

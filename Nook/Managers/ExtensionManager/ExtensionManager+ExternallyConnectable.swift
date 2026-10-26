@@ -587,7 +587,7 @@ extension ExtensionManager {
     }
 
     /// Write `contents` only when it differs from what is on disk.
-    private static func writeIfChanged(_ contents: String, to url: URL) {
+    static func writeIfChanged(_ contents: String, to url: URL) {
         guard (try? String(contentsOf: url, encoding: .utf8)) != contents else { return }
         try? contents.write(to: url, atomically: true, encoding: .utf8)
     }
@@ -986,6 +986,10 @@ extension ExtensionManager {
                 Self.logger.info("Updated nook_iframe_bridge.js for Bitwarden iframe message forwarding")
                 changed = true
             }
+        }
+
+        if Self.installBackgroundCompat(in: &manifest, packageDir: manifestURL.deletingLastPathComponent()) {
+            changed = true
         }
 
         if changed {
