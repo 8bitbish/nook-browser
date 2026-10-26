@@ -25,8 +25,9 @@ extension ExtensionManager {
     /// behaviour (sidePanel, debugger, downloads) are left missing, since a stub would hide the
     /// failure.
     ///
-    /// The members are added to WebKit's own namespace objects. Replacing `chrome` or
-    /// `browser` with a Proxy stopped WebKit delivering any event to the worker.
+    /// The members are added to WebKit's own namespace objects, by assignment: WebKit ignores
+    /// Object.defineProperty there. Replacing `chrome` or `browser` (with a Proxy, or with a
+    /// forwarding object) stops WebKit delivering any event to the worker.
     static let backgroundCompatJS = """
         // Nook: Chrome API stand-ins for WebKit
         (() => {
@@ -38,10 +39,20 @@ extension ExtensionManager {
             clear: async () => {},
             onChange: event(),
           });
-          const add = (target, name, value) => {
-            if (target && target[name] === undefined) {
-              Object.defineProperty(target, name, { value, configurable: true, enumerable: true, writable: true });
+          // `chrome.runtime`, `chrome.tabs` and the like are JS wrappers around WebKit objects. A
+          // wrapper nothing holds can be collected and handed out fresh on the next read, without
+          // what was added to it, so every object touched here is kept alive for the worker's life.
+          const kept = globalThis.__nookCompatKept || (globalThis.__nookCompatKept = new Set());
+          const put = (target, name, value) => {
+            if (!target) return;
+            kept.add(target);
+            try { target[name] = value; } catch (e) {}
+            if (target[name] !== value) {
+              try { Object.defineProperty(target, name, { value, configurable: true, enumerable: true, writable: true }); } catch (e) {}
             }
+          };
+          const add = (target, name, value) => {
+            if (target && target[name] === undefined) put(target, name, value);
           };
           for (const ns of new Set([globalThis.browser, globalThis.chrome])) {
             if (!ns) continue;
@@ -62,6 +73,9 @@ extension ExtensionManager {
               getAutoLockDelay: async () => 0,
               onStateChanged: event(),
             });
+          }
+          for (const ns of new Set([globalThis.browser, globalThis.chrome])) {
+            if (!ns || !ns.runtime) continue;
             add(ns.runtime, 'onSuspend', event());
             add(ns.runtime, 'onSuspendCanceled', event());
             add(ns.runtime, 'ContextType', {
@@ -108,6 +122,24 @@ extension ExtensionManager {
               add(ns, 'offscreen', offscreen);
               add(ns.runtime, 'getContexts', getContexts);
             }
+          }
+
+          // A message for a tab showing one of the extension's own pages. Chrome delivers
+          // tabs.sendMessage to such a page; WebKit only to content scripts, which extension pages
+          // never have, so the message went nowhere. NordPass sends its Nord Account sign-in URL
+          // to its own login tab this way, and the sign-in stopped after the email. Such a tab
+          // gets it through runtime.sendMessage, which reaches the extension's pages.
+          if (api && api.tabs && api.tabs.sendMessage && api.runtime && api.runtime.sendMessage) {
+            const tabsSend = api.tabs.sendMessage.bind(api.tabs);
+            const ownPrefix = api.runtime.getURL('');
+            put(api.tabs, 'sendMessage', async (tabId, message, options) => {
+              let tab = null;
+              try { tab = await api.tabs.get(tabId); } catch (e) {}
+              if (tab && typeof tab.url === 'string' && tab.url.startsWith(ownPrefix)) {
+                return api.runtime.sendMessage(message);
+              }
+              return tabsSend(tabId, message, options);
+            });
           }
 
           // Uncaught errors in the background, kept in the extension's own storage under

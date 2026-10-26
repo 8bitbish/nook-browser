@@ -313,6 +313,7 @@ public final class PageSession: NSObject, Identifiable {
         let configuration: WKWebViewConfiguration
         if let extensionPage = extensionPageConfiguration() {
             configuration = extensionPage
+            ExtensionPageDiagnostics.install(on: configuration.userContentController, page: url)
         } else if let resolvedProfile {
             configuration = BrowserConfiguration.shared.webViewConfiguration(for: resolvedProfile)
         } else {
