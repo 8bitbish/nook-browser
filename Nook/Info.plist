@@ -42,18 +42,22 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>NSAppleScriptEnabled</key>
+	<true/>
+	<key>OSAScriptingDefinition</key>
+	<string>Nook.sdef</string>
 	<key>SUAllowsAutomaticUpdates</key>
-	<true/>
+	<false/>
 	<key>SUAutomaticallyInstall</key>
-	<true/>
+	<false/>
 	<key>SUAutomaticallyUpdate</key>
-	<true/>
+	<false/>
 	<key>SUEnableAutomaticChecks</key>
-	<true/>
+	<false/>
 	<key>SUEnableDowngrade</key>
 	<false/>
 	<key>SUFeedURL</key>
-	<string>https://nook-browser.github.io/Nook/appcast.xml</string>
+	<string>https://raw.githubusercontent.com/8bitbish/nook-browser/personal/personal-build/appcast.xml</string>
 	<key>SUPublicEDKey</key>
 	<string>oWrc3J4HWz5PEVE5fIMKj5fEnCUwqYl0bO1li3xOYM4=</string>
 	<key>SUScheduledCheckInterval</key>

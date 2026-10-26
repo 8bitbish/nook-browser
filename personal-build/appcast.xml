@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Personal build feed. Intentionally empty: personal-build/sync.sh builds and installs updates
+     on this Mac, and the app's Sparkle feed points here so upstream's appcast can't replace it. -->
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+  <channel>
+    <title>Nook (personal build)</title>
+  </channel>
+</rss>
