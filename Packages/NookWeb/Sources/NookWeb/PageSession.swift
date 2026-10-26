@@ -294,12 +294,26 @@ public final class PageSession: NSObject, Identifiable {
         primaryWindowId = windowId
     }
 
+    /// An extension's own page (its sign-in or options page opened as a tab) needs that
+    /// extension's configuration from the start: with a tab's, the `webkit-extension://` URL does
+    /// not resolve and the tab stays blank, titled with the extension's host. Setting it on the
+    /// view afterwards does nothing, since `WKWebView.configuration` hands back a copy.
+    private func extensionPageConfiguration() -> WKWebViewConfiguration? {
+        guard !isPrivate, !isAgentPage,
+              let scheme = url.scheme?.lowercased(), scheme == "webkit-extension" || scheme == "safari-web-extension",
+              let context = controller?.tabEvents?.nativeController?.extensionContext(for: url)
+        else { return nil }
+        return context.webViewConfiguration
+    }
+
     private func setupWebView() {
         let interval = BrowserPerformance.signposter.beginInterval("WebViewCreation")
         defer { BrowserPerformance.signposter.endInterval("WebViewCreation", interval) }
         let resolvedProfile = profile
         let configuration: WKWebViewConfiguration
-        if let resolvedProfile {
+        if let extensionPage = extensionPageConfiguration() {
+            configuration = extensionPage
+        } else if let resolvedProfile {
             configuration = BrowserConfiguration.shared.webViewConfiguration(for: resolvedProfile)
         } else {
             // Edge case: no profile yet. Delay creating WKWebView until one resolves.
