@@ -100,9 +100,14 @@ extension PlatformPageView: NSViewRepresentable {
 
         /// Makes `value` the selection while its page is still settling into place. `current`
         /// moves first, so the update the binding causes finds nothing to animate.
-        func select(_ value: SelectionValue) {
+        func select(_ value: SelectionValue, deferred: Bool = false) {
             current = value
-            parent.selection = value
+            guard deferred else { parent.selection = value; return }
+            // On the next turn, after the frame that starts the settle has been committed.
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.current == value else { return }
+                self.parent.selection = value
+            }
         }
     }
 
@@ -154,7 +159,7 @@ extension PlatformPageView: NSViewRepresentable {
             place(view)
             setOffset(0, page: page, incoming: view, forward: forward)
             run(to: forward ? -bounds.width : bounds.width, page: page, incoming: view, forward: forward,
-                animation: Self.settle, completion: completion)
+                completion: completion)
         }
 
         /// Ends a settle still under way at once, so the next swipe starts from a page at rest.
@@ -162,7 +167,7 @@ extension PlatformPageView: NSViewRepresentable {
             guard let pending = pendingSettle else { return }
             pendingSettle = nil
             settleID += 1
-            for view in subviews { view.layer?.removeAllAnimations() }
+            for view in subviews { view.layer?.removeAnimation(forKey: Self.settleKey) }
             pending()
         }
 
@@ -250,25 +255,27 @@ extension PlatformPageView: NSViewRepresentable {
                     if let target, commits {
                         // Carries the finger's speed into the spring, so a flick keeps going.
                         let remaining = max(1 - abs(amount), 0.05)
+                        let springVelocity = min(abs(velocity) / remaining, 30)
                         let animation = Animation.interpolatingSpring(
-                            duration: Self.settleDuration, bounce: 0,
-                            initialVelocity: min(abs(velocity) / remaining, 30))
+                            duration: Self.settleDuration, bounce: 0, initialVelocity: springVelocity)
+                        // The window's page and colour follow first, then the sidebar's spring.
                         coordinator.report(target.value, 1, forward: target.forward, animation: animation)
-                        // The space changes now: its page is on its way in, and nothing that
-                        // follows the selection waits for the spring.
-                        coordinator.select(target.value)
                         let released = ProcessInfo.processInfo.systemUptime
                         self.run(to: target.forward ? -width : width, page: page, incoming: target.view,
-                                 forward: target.forward, animation: animation) {
+                                 forward: target.forward, velocity: springVelocity) {
                             Self.log.notice("swipe settled \(Int((ProcessInfo.processInfo.systemUptime - released) * 1000), privacy: .public)ms after release")
                             coordinator.show(target.value)
                             coordinator.report(nil, 0)
                         }
+                        // Hands the spring and the page swap to Core Animation now: the selection
+                        // below runs the space change on the main thread, and in the same turn it
+                        // held the spring's first frame back until it was done.
+                        CATransaction.flush()
+                        coordinator.select(target.value, deferred: true)
                     } else {
                         let incoming = target?.view
                         coordinator.report(target?.value, 0, forward: target?.forward ?? true, animation: Self.settle)
-                        self.run(to: 0, page: page, incoming: incoming, forward: target?.forward ?? true,
-                                 animation: Self.settle) {
+                        self.run(to: 0, page: page, incoming: incoming, forward: target?.forward ?? true) {
                             incoming?.removeFromSuperview()
                             if self.incoming === incoming { self.incoming = nil }
                             page.frame = self.bounds
@@ -309,7 +316,7 @@ extension PlatformPageView: NSViewRepresentable {
             let sign: CGFloat = forward ? -1 : 1
             let start = ProcessInfo.processInfo.systemUptime
             var first = true
-            Timer.scheduledTimer(withTimeInterval: 1.0 / 120, repeats: true) { timer in
+            let timer = Timer(timeInterval: 1.0 / 120, repeats: true) { timer in
                 MainActor.assumeIsolated {
                     let t = min((ProcessInfo.processInfo.systemUptime - start) / duration, 1)
                     let amount = sign * reach * CGFloat(t)
@@ -321,6 +328,7 @@ extension PlatformPageView: NSViewRepresentable {
                     }
                 }
             }
+            RunLoop.main.add(timer, forMode: .common)
         }
 
         /// `spaceSettle`'s response, for the velocity-carrying spring a release starts.
@@ -339,22 +347,65 @@ extension PlatformPageView: NSViewRepresentable {
             incoming?.frame = bounds.offsetBy(dx: offset + (forward ? bounds.width : -bounds.width), dy: 0)
         }
 
+        /// Settles the pages with a Core Animation spring. The frames take their final values at
+        /// once and the layers' positions animate in the render server, so nothing the main
+        /// thread does meanwhile (the space change re-rendering the window) can stall the motion.
+        /// `velocity` is the finger's speed as a share of the remaining distance per second.
         private func run(to offset: CGFloat, page: NSView, incoming: NSView?, forward: Bool,
-                         animation: Animation, completion: @escaping () -> Void) {
+                         velocity: CGFloat = 0, completion: @escaping () -> Void) {
             let width = bounds.width
             settleID += 1
             let id = settleID
+            Self.measureHitches()
             pendingSettle = completion
-            NSAnimationContext.animate(animation) {
-                page.animator().frame = bounds.offsetBy(dx: offset, dy: 0)
-                incoming?.animator().frame = bounds.offsetBy(dx: offset + (forward ? width : -width), dy: 0)
-            } completion: {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            CATransaction.setCompletionBlock {
                 MainActor.assumeIsolated {
                     guard self.settleID == id, let pending = self.pendingSettle else { return }
                     self.pendingSettle = nil
                     pending()
                 }
             }
+            let moves: [(NSView, NSRect)] = [(page, bounds.offsetBy(dx: offset, dy: 0))]
+                + (incoming.map { [($0, bounds.offsetBy(dx: offset + (forward ? width : -width), dy: 0))] } ?? [])
+            for (view, frame) in moves {
+                guard let layer = view.layer else { view.frame = frame; continue }
+                let from = layer.presentation()?.position ?? layer.position
+                view.frame = frame
+                let to = layer.position
+                guard from != to else { continue }
+                let spring = CASpringAnimation(perceptualDuration: Self.settleDuration, bounce: 0)
+                spring.keyPath = "position"
+                spring.fromValue = NSValue(point: from)
+                spring.toValue = NSValue(point: to)
+                spring.initialVelocity = velocity
+                spring.duration = spring.settlingDuration
+                layer.add(spring, forKey: Self.settleKey)
+            }
+            CATransaction.commit()
+        }
+
+        private static var settleKey: String { "nook.pageSettle" }
+
+        /// Logs the longest main-thread gap over the first half second of a settle: the main
+        /// thread draws the window's colour and the sidebar's SwiftUI content, so a gap there is a
+        /// visible hitch. A timer only while the settle runs, nothing at rest.
+        private static func measureHitches() {
+            let start = ProcessInfo.processInfo.systemUptime
+            var last = start
+            var worst: TimeInterval = 0
+            var worstAt: TimeInterval = 0
+            let timer = Timer(timeInterval: 1.0 / 120, repeats: true) { timer in
+                let now = ProcessInfo.processInfo.systemUptime
+                if now - last > worst { worst = now - last; worstAt = last - start }
+                last = now
+                guard now - start >= 0.5 else { return }
+                timer.invalidate()
+                log.notice("settle hitch: longest main-thread gap \(Int(worst * 1000), privacy: .public)ms at +\(Int(worstAt * 1000), privacy: .public)ms")
+            }
+            // Common modes, so time spent tracking a gesture does not read as a stall.
+            RunLoop.main.add(timer, forMode: .common)
         }
 
         /// Gesture amount per second over the last few samples, so a quick flick commits.

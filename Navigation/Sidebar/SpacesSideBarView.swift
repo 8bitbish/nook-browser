@@ -227,11 +227,8 @@ struct SpacesSideBarView: View {
             }
             // The next space's page gets ready out of sight and shows the moment the swipe commits.
             browserManager.spaceSwipeStep(swipe, animation: step.animation, in: windowState)
-            if let animation = step.animation {
-                withAnimation(animation) { windowState.spaceSwipe = swipe }
-            } else {
-                windowState.spaceSwipe = swipe
-            }
+            // The colour is drawn from the step above; nothing renders from this, so no animation.
+            windowState.spaceSwipe = swipe
         }
         .contentShape(Rectangle())
         // Pages are cached hosting views; a different set of spaces needs new pages.
@@ -392,8 +389,16 @@ struct SpacesSideBarView: View {
         browserManager.spaceSwipeSelected(in: windowState, setSpaceStarted: started)
     }
 
-    @ViewBuilder
     private func makeSpaceView(for space: SpaceRecord) -> some View {
+        spacePage(for: space)
+            // A page is its own hosting view and inherits nothing. Without the real service, every
+            // read of `\.nookSettings` in it built a fresh one from UserDefaults: slow on each
+            // re-render of a space switch, and blind to settings changes.
+            .environment(\.nookSettings, nookSettings)
+    }
+
+    @ViewBuilder
+    private func spacePage(for space: SpaceRecord) -> some View {
         VStack(spacing: 0) {
             if !windowState.isIncognito {
                 PinnedGrid(

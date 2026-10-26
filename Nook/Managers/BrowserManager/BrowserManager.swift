@@ -608,6 +608,8 @@ class BrowserManager: ObservableObject {
     // MARK: - Space Warming
 
     private var spaceWarmTasks: [UUID: Task<Void, Never>] = [:]
+    /// Windows whose space changed under a swipe; their profile switch runs once it settles.
+    private var pendingProfileSwitch: Set<UUID> = []
 
     /// Starts loading the page `spaceID` will show in `window`, so arriving there by swipe,
     /// shortcut or click finds it drawn instead of waiting on the network. Only a page the window
@@ -660,7 +662,32 @@ class BrowserManager: ObservableObject {
     /// One step of a sidebar swipe between spaces. The page stays put while the fingers move; the
     /// next space's page draws out of sight meanwhile and goes on screen the moment the swipe
     /// commits. `animation` is set on release: the settle to 1 (commit) or back to 0.
+    private struct WeakBackdrop { weak var view: SpaceBackdropView? }
+    private var spaceBackdrops: [UUID: WeakBackdrop] = [:]
+
+    /// The view drawing `windowID`'s colour, so swipe steps reach it without going through SwiftUI.
+    func registerSpaceBackdrop(_ view: SpaceBackdropView, for windowID: UUID) {
+        spaceBackdrops[windowID] = WeakBackdrop(view: view)
+    }
+
     func spaceSwipeStep(_ swipe: SpaceSwipe?, animation: Animation?, in window: BrowserWindowState) {
+        // The window's colour follows the swipe directly.
+        if let backdrop = spaceBackdrops[window.id]?.view {
+            if let swipe {
+                backdrop.swipe(to: swipe.target, fraction: CGFloat(swipe.fraction),
+                               release: animation == nil ? nil : swipe.fraction >= 1)
+            } else {
+                backdrop.endSwipe()
+            }
+        }
+        if swipe == nil, pendingProfileSwitch.contains(window.id) {
+            // The swipe has settled: the profile switch it held back runs on the next turn, after
+            // the colour has had its last frame.
+            DispatchQueue.main.async { [weak self, weak window] in
+                guard let self, let window, window.spaceSwipe == nil, self.pendingProfileSwitch.contains(window.id) else { return }
+                self.windowSpaceChanged(window)
+            }
+        }
         guard let host = webViewCoordinator?.compositorContainerView(for: window.id) as? SpaceSwipeHost else { return }
         guard let swipe else { return host.spaceSwipePage.apply(nil) }
         let itemID = tabs.rememberedItem(inSpace: swipe.target, in: window)
@@ -697,18 +724,26 @@ class BrowserManager: ObservableObject {
     /// follow it. Only the active window's space sets the app-wide managers.
     func windowSpaceChanged(_ windowState: BrowserWindowState) {
         guard !windowState.isIncognito else { return }
+        // Publishing a new profile re-evaluates every view that observes this manager, about
+        // 100 ms on the main thread. Under a swipe that stalled the sidebar's spring at the
+        // moment the fingers lifted, so the switch waits until the swipe has settled.
+        if windowState.spaceSwipe != nil {
+            pendingProfileSwitch.insert(windowState.id)
+            return
+        }
+        pendingProfileSwitch.remove(windowState.id)
         guard windowRegistry?.activeWindow == nil || windowRegistry?.activeWindow?.id == windowState.id else { return }
         guard let spaceID = windowState.spaceID, let profile = tabs.profile(forSpace: spaceID),
               currentProfile?.id != profile.id else { return }
 
+        let started = ProcessInfo.processInfo.systemUptime
         isSwitchingSpace = true
-        withAnimation(.easeInOut(duration: Self.spaceSwitchDuration)) {
-            currentProfile = profile
-            // Settings loads these lists when it opens; reading every cookie and data record here stalled the switch.
-            cookieManager.switchDataStore(profile.dataStore, profileId: profile.id, eagerLoad: false)
-            cacheManager.switchDataStore(profile.dataStore, profileId: profile.id, eagerLoad: false)
-            historyManager.switchProfile(profile.id)
-        }
+        currentProfile = profile
+        // Settings loads these lists when it opens; reading every cookie and data record here stalled the switch.
+        cookieManager.switchDataStore(profile.dataStore, profileId: profile.id, eagerLoad: false)
+        cacheManager.switchDataStore(profile.dataStore, profileId: profile.id, eagerLoad: false)
+        historyManager.switchProfile(profile.id)
+        Self.swipeLog.notice("profile switched in \(Int((ProcessInfo.processInfo.systemUptime - started) * 1000), privacy: .public)ms")
         transitionEndTask?.cancel()
         transitionEndTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(Self.spaceSwitchDuration))
