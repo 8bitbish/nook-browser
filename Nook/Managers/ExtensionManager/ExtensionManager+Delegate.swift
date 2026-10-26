@@ -383,7 +383,14 @@ extension ExtensionManager {
         extensionPopupWindows.append(popup)
         controller.didOpenWindow(popup)
         controller.didOpenTab(popup.tab)
-        if configuration.shouldBeFocused { popup.show() } else { popup.window.orderFront(nil) }
+        if url.fragment == "nook-offscreen" {
+            // An offscreen document (see `backgroundCompatJS`): the page runs, the window never shows.
+            Self.logger.notice("Extension opened offscreen document \(url.lastPathComponent, privacy: .public)")
+        } else if configuration.shouldBeFocused {
+            popup.show()
+        } else {
+            popup.window.orderFront(nil)
+        }
         Self.logger.info("Extension opened popup window \(url.lastPathComponent, privacy: .public)")
         return popup
     }

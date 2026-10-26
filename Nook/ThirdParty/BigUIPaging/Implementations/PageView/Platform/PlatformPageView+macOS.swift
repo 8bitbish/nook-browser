@@ -162,12 +162,15 @@ extension PlatformPageView: NSViewRepresentable {
                 completion: completion)
         }
 
-        /// Share of the width a drag must pass to commit without a flick.
-        private static var dragThreshold: CGFloat { 0.3 }
+        /// Share of the width a drag must pass to commit without a flick: Arc's quarter.
+        private static var dragThreshold: CGFloat { 0.25 }
         /// Peak speed, in widths per second, at which a release commits however short it was.
-        private static var flickSpeed: CGFloat { 0.4 }
-        /// Shortest flick that counts: below this the fingers barely moved.
-        private static var flickDistance: CGFloat { 0.015 }
+        /// From Jake's flicks that sprang back: peaks of 0.7 to 3.9 over 2-24% of the width.
+        private static var flickSpeed: CGFloat { 0.35 }
+        /// Shortest flick that counts, about 5 pt: below this the fingers barely moved.
+        private static var flickDistance: CGFloat { 0.02 }
+        /// Longest gesture, in seconds, that counts as a flick on its peak speed alone.
+        private static var flickDuration: TimeInterval { 0.3 }
 
         /// How far the page goes for a gesture amount: 85% of the finger at the start, easing to
         /// 1:1 at a full width, so the swipe has weight without ever lagging behind at the end.
@@ -188,26 +191,134 @@ extension PlatformPageView: NSViewRepresentable {
             axis == .horizontal
         }
 
+        // MARK: - Trackpad
+
+        /// The swipe under way, fed from raw scroll events. AppKit's `trackSwipeEvent` judged
+        /// each gesture by its own thresholds first: short or quick swipes came back cancelled,
+        /// and a swipe right after another often arrived with no movement at all, so tiny
+        /// flicks and swipes in a row went nowhere whatever Nook's own rules said.
+        private var gesture: (hasPrevious: Bool, hasNext: Bool, step: (CGFloat, NSEvent.Phase) -> Bool)?
+        /// The fingers' travel to the right so far, in points.
+        private var travelX: CGFloat = 0
+        /// A gesture whose direction is not known yet, and the events it has sent so far, so a
+        /// vertical one can still go to the tab list's scroll view whole.
+        private var undecided: [NSEvent] = []
+        private var undecidedX: CGFloat = 0
+        private var undecidedY: CGFloat = 0
+
+        /// Takes the rest of a gesture straight from the event stream once its first event has
+        /// reached the pager, so the swipe sees every movement however AppKit routes the later
+        /// events (over the tab list's scroll view, or after the pointer leaves the sidebar).
+        private var gestureMonitor: Any?
+
         override func scrollWheel(with event: NSEvent) {
-            guard event.phase == .began, event.hasPreciseScrollingDeltas,
-                  abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY)
-            else { return super.scrollWheel(with: event) }
-            guard !isTracking, NSEvent.isSwipeTrackingFromScrollEventsEnabled else {
-                Self.log.notice("swipe ignored: \(self.isTracking ? "still tracking" : "swipe tracking off in System Settings", privacy: .public)")
+            guard event.phase == .began, event.hasPreciseScrollingDeltas, event.momentumPhase.isEmpty else {
                 return super.scrollWheel(with: event)
             }
-            guard let swipe = beginSwipe() else { return super.scrollWheel(with: event) }
-
-            // Positive amounts drag the page right, toward the previous space. Past the first or
-            // last space the amount is damped toward 0, which reads as a rubber band.
-            event.trackSwipeEvent(
-                options: [.lockDirection, .clampGestureAmount],
-                dampenAmountThresholdMin: swipe.hasNext ? -1 : 0,
-                max: swipe.hasPrevious ? 1 : 0
-            ) { amount, phase, _, stop in
-                if swipe.step(amount, phase) { stop.pointee = true }
+            endGesture()
+            let (x, y) = Self.fingers(event)
+            undecided = [event]
+            undecidedX = x
+            undecidedY = y
+            stopMonitor()
+            gestureMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+                guard let self else { return event }
+                return MainActor.assumeIsolated { self.capture(event) } ? nil : event
             }
         }
+
+        /// One event of the captured gesture. Returns true when the swipe took it.
+        private func capture(_ event: NSEvent) -> Bool {
+            guard event.momentumPhase.isEmpty else { return false }
+            let (x, y) = Self.fingers(event)
+            switch event.phase {
+            case .changed where gesture != nil:
+                travelX += x
+                _ = gesture?.step(amount(for: travelX), .changed)
+                return true
+            case .changed where !undecided.isEmpty:
+                undecided.append(event)
+                undecidedX += x
+                undecidedY += y
+                // Decided after a few points of movement, by the axis that moved more.
+                guard hypot(undecidedX, undecidedY) >= Self.axisDecision else { return true }
+                let events = undecided
+                undecided = []
+                Self.log.notice("gesture axis: \(abs(self.undecidedX) > abs(self.undecidedY) ? "horizontal" : "vertical", privacy: .public) x \(Int(self.undecidedX), privacy: .public) y \(Int(self.undecidedY), privacy: .public) after \(events.count, privacy: .public) events")
+                if abs(undecidedX) > abs(undecidedY), NSEvent.isSwipeTrackingFromScrollEventsEnabled,
+                   let swipe = beginSwipe() {
+                    gesture = swipe
+                    travelX = undecidedX
+                    _ = swipe.step(amount(for: travelX), .began)
+                    return true
+                }
+                // Not a swipe: what was held back goes on as ordinary scrolling.
+                stopMonitor()
+                events.dropLast().forEach { super.scrollWheel(with: $0) }
+                return false
+            case .ended, .cancelled:
+                stopMonitor()
+                if let swipe = gesture {
+                    // The amount first: it reads which sides are open from the gesture.
+                    let final = amount(for: travelX)
+                    gesture = nil
+                    _ = swipe.step(final, .ended)
+                    return true
+                }
+                // Barely moved: an accidental touch, not a swipe.
+                let events = undecided
+                undecided = []
+                events.forEach { super.scrollWheel(with: $0) }
+                return false
+            case .began:
+                // A new gesture before this one ended: it starts over from the pager.
+                endGesture()
+                stopMonitor()
+                undecided = []
+                return false
+            default:
+                return gesture != nil || !undecided.isEmpty
+            }
+        }
+
+        private func stopMonitor() {
+            if let gestureMonitor { NSEvent.removeMonitor(gestureMonitor) }
+            gestureMonitor = nil
+        }
+
+        /// The fingers' movement in points, x positive to the right, whichever way the
+        /// scrolling direction setting points: right drags the page toward the previous space.
+        private static func fingers(_ event: NSEvent) -> (CGFloat, CGFloat) {
+            let x = event.isDirectionInvertedFromDevice ? event.scrollingDeltaX : -event.scrollingDeltaX
+            return (x, event.scrollingDeltaY)
+        }
+
+        /// A swipe left hanging (a new gesture began without the last one ending) ends here.
+        private func endGesture() {
+            guard let swipe = gesture else { return }
+            let final = amount(for: travelX)
+            gesture = nil
+            _ = swipe.step(final, .ended)
+        }
+
+        /// Points of movement before a gesture's axis is decided.
+        private static var axisDecision: CGFloat { 3 }
+
+        /// The gesture amount for the fingers' travel: a share of the width, positive toward the
+        /// previous space, at most one page either way. Toward a side with no space it is damped
+        /// to a short rubber band.
+        private func amount(for travel: CGFloat) -> CGFloat {
+            let raw = travel / max(bounds.width, 1)
+            let open = raw > 0 ? (gesture?.hasPrevious ?? false) : (gesture?.hasNext ?? false)
+            guard open else {
+                let band = Self.rubberBand * (1 - exp(-abs(raw) * 4))
+                return raw > 0 ? band : -band
+            }
+            return min(max(raw, -1), 1)
+        }
+
+        /// Furthest the page moves past the first or last space, as a share of the width.
+        private static var rubberBand: CGFloat { 0.12 }
 
         /// One swipe's handler: `step` takes each gesture amount and returns true once the swipe
         /// is over. Nil when there is nowhere to go.
@@ -270,13 +381,17 @@ extension PlatformPageView: NSViewRepresentable {
                     let velocity = Self.velocity(samples)
                     // A flick commits however short it was, on its peak speed; a slow drag needs
                     // to pass a third of the way.
+                    // A flick is quick: still moving fast as it lifts, or short and fast at its
+                    // peak. A slow drag that stops short is not one, however it started.
+                    let quick = Double(elapsed) / 1000 <= Self.flickDuration
                     let commits = phase == .ended && target.map {
                         let peak = $0.forward ? peakForward : peakBack
-                        return $0.forward == (amount < 0)
-                            && (abs(amount) > Self.dragThreshold
-                                || (peak >= Self.flickSpeed && abs(amount) >= Self.flickDistance))
+                        let release = $0.forward ? -velocity : velocity
+                        let flick = abs(amount) >= Self.flickDistance
+                            && (release >= Self.flickSpeed || (quick && peak >= Self.flickSpeed))
+                        return $0.forward == (amount < 0) && (abs(amount) > Self.dragThreshold || flick)
                     } == true
-                    Self.log.notice("swipe ended +\(elapsed, privacy: .public)ms amount \(String(format: "%.2f", amount), privacy: .public) velocity \(String(format: "%.1f", velocity), privacy: .public)/s peak \(String(format: "%.1f", max(peakForward, peakBack)), privacy: .public)/s steps \(steps, privacy: .public) \(commits ? "commit" : "cancel", privacy: .public)")
+                    Self.log.notice("swipe ended +\(elapsed, privacy: .public)ms amount \(String(format: "%.2f", amount), privacy: .public) velocity \(String(format: "%.1f", velocity), privacy: .public)/s peak \(String(format: "%.1f", max(peakForward, peakBack)), privacy: .public)/s fingers \(Int(self.travelX), privacy: .public)pt of \(Int(width), privacy: .public) steps \(steps, privacy: .public) \(commits ? "commit" : "cancel", privacy: .public)")
                     if let target, commits {
                         // Carries the finger's speed into the spring, so a flick keeps going.
                         let remaining = max(1 - abs(Self.travel(amount)), 0.05)
@@ -324,6 +439,7 @@ extension PlatformPageView: NSViewRepresentable {
         /// notification `com.gstudios.nook.testSwipe` (object "forward|back,<seconds>[,<amount>]").
         /// Off unless that argument is passed, so an installed app never listens.
         private var testObserver: NSObjectProtocol?
+        private var scrollObserver: NSObjectProtocol?
 
         private func installTestDriver() {
             guard UserDefaults.standard.bool(forKey: "NookSwipeTestDriver") else { return }
@@ -335,6 +451,65 @@ extension PlatformPageView: NSViewRepresentable {
                 let duration = parts.count > 1 ? Double(parts[1]) ?? 0.4 : 0.4
                 let reach = parts.count > 2 ? Double(parts[2]) ?? 0.6 : 0.6
                 MainActor.assumeIsolated { self?.playTestSwipe(forward: forward, duration: duration, reach: reach) }
+            }
+            scrollObserver = DistributedNotificationCenter.default().addObserver(
+                forName: Notification.Name("com.gstudios.nook.testScroll"), object: nil, queue: .main
+            ) { [weak self] note in
+                let parts = (note.object as? String ?? "-40,100").split(separator: ",").compactMap { Double($0) }
+                MainActor.assumeIsolated {
+                    self?.playTestScroll(dx: CGFloat(parts.first ?? -40), dy: CGFloat(parts.count > 2 ? parts[2] : 0),
+                                         duration: (parts.count > 1 ? parts[1] : 100) / 1000)
+                }
+            }
+        }
+
+        /// Plays one trackpad gesture as real scroll events through the app's event queue, so the
+        /// test covers dispatch, the gesture monitor and the handler: notification
+        /// `com.gstudios.nook.testScroll`, object "<points right>,<ms>[,<points down>]".
+        private func playTestScroll(dx: CGFloat, dy: CGFloat, duration: TimeInterval) {
+            guard let window else { return }
+            let point = convert(NSPoint(x: bounds.midX, y: bounds.midY), to: nil)
+            let steps = max(Int(duration / 0.008), 1)
+            var sent = 0
+            func post(_ x: CGFloat, _ y: CGFloat, phase: Int64) {
+                guard let cg = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 2,
+                                       wheel1: Int32(y.rounded()), wheel2: Int32(x.rounded()), wheel3: 0) else { return }
+                cg.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
+                cg.setIntegerValueField(.scrollWheelEventScrollPhase, value: phase)
+                cg.setDoubleValueField(.scrollWheelEventPointDeltaAxis2, value: x)
+                cg.setDoubleValueField(.scrollWheelEventPointDeltaAxis1, value: y)
+                cg.setIntegerValueField(.mouseEventWindowUnderMousePointer, value: Int64(window.windowNumber))
+                cg.setIntegerValueField(.mouseEventWindowUnderMousePointerThatCanHandleThisEvent, value: Int64(window.windowNumber))
+                cg.location = CGPoint(x: window.frame.minX + point.x,
+                                      y: (NSScreen.screens.first?.frame.height ?? 0) - (window.frame.minY + point.y))
+                guard let event = NSEvent(cgEvent: cg) else { return }
+                if phase == 1 {
+                    Self.log.notice("test scroll: \(Int(dx), privacy: .public) pt right, \(Int(dy), privacy: .public) pt down over \(Int(duration * 1000), privacy: .public) ms")
+                }
+                if phase == 1 {
+                    // A real gesture's first event reaches the pager by hit testing; the rest
+                    // go through the app's queue, where only the gesture monitor can catch them.
+                    scrollWheel(with: event)
+                } else {
+                    NSApp.postEvent(event, atStart: false)
+                }
+            }
+            // Scroll deltas point the way the content moves: -dx for fingers moving right. Deltas
+            // are whole points, so each step carries the rounding left by the last.
+            post(0, 0, phase: 1)
+            var postedX: CGFloat = 0
+            var postedY: CGFloat = 0
+            Timer.scheduledTimer(withTimeInterval: 0.008, repeats: true) { timer in
+                MainActor.assumeIsolated {
+                    sent += 1
+                    let share = CGFloat(sent) / CGFloat(steps)
+                    let x = (-dx * share).rounded() - postedX
+                    let y = (dy * share).rounded() - postedY
+                    postedX += x
+                    postedY += y
+                    post(x, y, phase: 2)
+                    if sent >= steps { timer.invalidate(); post(0, 0, phase: 4) }
+                }
             }
         }
 
@@ -435,7 +610,9 @@ extension PlatformPageView: NSViewRepresentable {
 
         /// Gesture amount per second over the last few samples, so a quick flick commits.
         private static func velocity(_ samples: [(amount: CGFloat, time: TimeInterval)]) -> CGFloat {
-            guard let first = samples.first, let last = samples.last, last.time > first.time else { return 0 }
+            // Events can arrive in pairs a fraction of a millisecond apart; a span shorter than
+            // about a frame would read as an absurd speed.
+            guard let first = samples.first, let last = samples.last, last.time - first.time >= 0.012 else { return 0 }
             return (last.amount - first.amount) / (last.time - first.time)
         }
     }

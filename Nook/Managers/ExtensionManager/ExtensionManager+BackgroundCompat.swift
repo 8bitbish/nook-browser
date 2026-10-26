@@ -20,8 +20,10 @@ extension ExtensionManager {
     /// async startup that throws registers nothing after that point: NordPass reads
     /// `chrome.privacy` first thing, so its toolbar click, autofill and sign-in never came up.
     /// Each stand-in below answers the way Chrome does when the browser declines the request,
-    /// so nothing pretends to work that does not. APIs with real behaviour (sidePanel,
-    /// offscreen, debugger, downloads) are left missing, since a stub would hide the failure.
+    /// so nothing pretends to work that does not. Offscreen documents are emulated for real (a
+    /// hidden extension window), since NordPass decrypts in one. APIs with other real
+    /// behaviour (sidePanel, debugger, downloads) are left missing, since a stub would hide the
+    /// failure.
     ///
     /// The members are added to WebKit's own namespace objects. Replacing `chrome` or
     /// `browser` with a Proxy stopped WebKit delivering any event to the worker.
@@ -62,7 +64,69 @@ extension ExtensionManager {
             });
             add(ns.runtime, 'onSuspend', event());
             add(ns.runtime, 'onSuspendCanceled', event());
+            add(ns.runtime, 'ContextType', {
+              BACKGROUND: 'BACKGROUND', POPUP: 'POPUP', TAB: 'TAB', SIDE_PANEL: 'SIDE_PANEL',
+              OFFSCREEN_DOCUMENT: 'OFFSCREEN_DOCUMENT',
+            });
           }
+
+          // Offscreen documents: the page opens in an extension popup window Nook never shows
+          // (the `#nook-offscreen` mark), and is found again after the worker restarts.
+          const api = globalThis.chrome;
+          if (api && api.windows && api.tabs) {
+            const mark = '#nook-offscreen';
+            const findOffscreen = async () => {
+              for (const w of await api.windows.getAll({ populate: true })) {
+                const tab = (w.tabs || []).find(t => (t.url || '').endsWith(mark));
+                if (tab) return { windowId: w.id, url: tab.url.slice(0, -mark.length) };
+              }
+              return null;
+            };
+            const offscreen = {
+              Reason: new Proxy({}, { get: (_, name) => String(name) }),
+              async createDocument({ url }) {
+                if (await findOffscreen()) throw new Error('Only a single offscreen document may be created.');
+                await api.windows.create({ url: api.runtime.getURL(url) + mark, type: 'popup', focused: false });
+              },
+              async closeDocument() {
+                const found = await findOffscreen();
+                if (!found) throw new Error('No current offscreen document.');
+                await api.windows.remove(found.windowId);
+              },
+              async hasDocument() { return !!(await findOffscreen()); },
+            };
+            const getContexts = async (filter = {}) => {
+              const found = await findOffscreen();
+              if (!found) return [];
+              if (filter.contextTypes && !filter.contextTypes.includes('OFFSCREEN_DOCUMENT')) return [];
+              if (filter.documentUrls && !filter.documentUrls.includes(found.url)) return [];
+              return [{ contextType: 'OFFSCREEN_DOCUMENT', documentUrl: found.url, documentOrigin: found.url.split('/').slice(0, 3).join('/'),
+                        windowId: found.windowId, tabId: -1, frameId: 0, incognito: false, contextId: 'nook-offscreen' }];
+            };
+            for (const ns of new Set([globalThis.browser, globalThis.chrome])) {
+              if (!ns) continue;
+              add(ns, 'offscreen', offscreen);
+              add(ns.runtime, 'getContexts', getContexts);
+            }
+          }
+
+          // Uncaught errors in the background, kept in the extension's own storage under
+          // `__nookErrors` (last 20), where Nook can read them from disk: a background that
+          // stops at startup otherwise fails without a trace.
+          // Writes queue one behind the other, so errors arriving together all land.
+          let pending = Promise.resolve();
+          const report = (kind, message) => {
+            const store = globalThis.chrome && globalThis.chrome.storage && globalThis.chrome.storage.local;
+            if (!store) return;
+            const entry = { at: new Date().toISOString(), kind, message: String(message).slice(0, 800) };
+            pending = pending.then(() => store.get('__nookErrors')).then(r => {
+              const list = (r.__nookErrors || []).slice(-19);
+              list.push(entry);
+              return store.set({ __nookErrors: list });
+            }).catch(() => {});
+          };
+          self.addEventListener('error', e => report('error', (e.error && e.error.stack) || `${e.message} @ ${e.filename}:${e.lineno}`));
+          self.addEventListener('unhandledrejection', e => report('rejection', (e.reason && (e.reason.stack || e.reason.message)) || e.reason));
         })();
         """
 
