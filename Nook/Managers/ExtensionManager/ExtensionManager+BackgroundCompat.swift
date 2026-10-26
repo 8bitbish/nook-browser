@@ -129,16 +129,39 @@ extension ExtensionManager {
           // never have, so the message went nowhere. NordPass sends its Nord Account sign-in URL
           // to its own login tab this way, and the sign-in stopped after the email. Such a tab
           // gets it through runtime.sendMessage, which reaches the extension's pages.
+          // A short trace of the background's messages to tabs and pages, kept beside
+          // `__nookErrors` as `__nookTrace` (last 40): the message type, where it went and why,
+          // never its contents.
+          let tracing = Promise.resolve();
+          const trace = entry => {
+            const store = api && api.storage && api.storage.local;
+            if (!store) return;
+            const item = { at: new Date().toISOString(), ...entry };
+            tracing = tracing.then(() => store.get('__nookTrace')).then(r => {
+              const list = (r.__nookTrace || []).slice(-39);
+              list.push(item);
+              return store.set({ __nookTrace: list });
+            }).catch(() => {});
+          };
+          const typeOf = message => (message && typeof message === 'object' && typeof message.type === 'string') ? message.type.slice(0, 60) : typeof message;
           if (api && api.tabs && api.tabs.sendMessage && api.runtime && api.runtime.sendMessage) {
             const tabsSend = api.tabs.sendMessage.bind(api.tabs);
+            const runtimeSend = api.runtime.sendMessage.bind(api.runtime);
             const ownPrefix = api.runtime.getURL('');
             put(api.tabs, 'sendMessage', async (tabId, message, options) => {
               let tab = null;
               try { tab = await api.tabs.get(tabId); } catch (e) {}
-              if (tab && typeof tab.url === 'string' && tab.url.startsWith(ownPrefix)) {
-                return api.runtime.sendMessage(message);
-              }
+              const own = !!(tab && typeof tab.url === 'string' && tab.url.startsWith(ownPrefix));
+              trace({ call: 'tabs.sendMessage', type: typeOf(message), tabUrlKnown: !!(tab && tab.url), ownPage: own,
+                      tabHost: tab && typeof tab.url === 'string' ? tab.url.split('/').slice(0, 3).join('/').slice(0, 60) : null });
+              if (own) return runtimeSend(message);
               return tabsSend(tabId, message, options);
+            });
+            put(api.runtime, 'sendMessage', (...args) => {
+              const message = args.find(a => a && typeof a === 'object' && !Array.isArray(a));
+              const type = typeOf(message);
+              if (type === 'OPEN_URL_IN_TAB' || /^OPEN|LOGIN|OAUTH/.test(type)) trace({ call: 'runtime.sendMessage', type });
+              return runtimeSend(...args);
             });
           }
 
