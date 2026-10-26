@@ -39,7 +39,9 @@ public struct SpaceIcon: View {
         } else {
             switch Self.kind(of: space.icon) {
             case .emoji(let text)?:
-                Text(text).font(font)
+                // Its own width, always: an emoji is wider than its point size, and a Text offered
+                // less (the 16pt favicon column) cuts the glyph off.
+                Text(text).font(font).fixedSize()
             case .symbol(let name)?:
                 Image(systemName: name).font(font)
             case nil:

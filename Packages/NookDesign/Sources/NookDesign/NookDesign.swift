@@ -78,6 +78,7 @@ public enum NookDesign {
         #endif
         public static let iconButton: CGFloat = 28
         public static let favicon: CGFloat = 16
+        public static let headingIconBox: CGFloat = 20 // space emoji box: a 14pt emoji is ~17.5pt wide, so a 16pt box cut it off
         public static let essentialsTile: CGFloat = 47   // Arc's favorite tile height
         public static let essentialsFavicon: CGFloat = 16 // Arc draws favicons in tiles at row size
         public static let navRow: CGFloat = 28
@@ -174,7 +175,7 @@ public enum NookDesign {
         public static let tintOpacity: Double = 0.18                       // accent-tinted control: chosen chip, own chat message
         public static let mediaScrim = Color.black.opacity(0.35)           // controls over video
         public static let hairline = Color.primary.opacity(0.08)
-        public static let separator = Color.primary.opacity(0.17)       // the pinned/tabs rule, Arc's 17%
+        public static let separator = Color.primary.opacity(0.18)       // the pinned/tabs rule, Arc's 18%
         public static let unloadedOpacity: Double = 0.55
         public static let inactiveSpaceIconOpacity: Double = 0.6  // other spaces' icons in the bottom bar, greyed as in Arc
         public static let dropBorderIdle = Color.secondary.opacity(0.3)    // dashed empty-state drop target

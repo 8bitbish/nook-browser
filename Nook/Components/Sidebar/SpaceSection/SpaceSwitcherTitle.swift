@@ -53,14 +53,21 @@ struct SpaceSwitcherTitle: View {
         }
     }
 
+    /// How far the emoji box reaches past the favicon column on each side.
+    private let iconOverhang = (NookDesign.Size.headingIconBox - NookDesign.Size.favicon) / 2
+
     private func label(_ space: SpaceRecord) -> some View {
         let isDropTarget = dragSession.isDragging && dragSession.activeZone == .target(.pinned(spaceID: space.id))
         // As in Arc: the space's icon in the favicon column, the name in the title column, dimmer
         // than the rows under it.
-        let title = HStack(spacing: NookDesign.Spacing.rowIconGap) {
-            if SpaceIcon.exists(for: space) {
+        let hasIcon = SpaceIcon.exists(for: space)
+        let title = HStack(spacing: NookDesign.Spacing.rowIconGap - iconOverhang) {
+            if hasIcon {
+                // Wider than the favicon column so the emoji is never cut off; the overhang comes
+                // out of the padding and the gap, so it stays centred on the column and the name
+                // stays on the title column.
                 SpaceIcon(space: space, font: NookDesign.Font.spaceHeadingIcon)
-                    .frame(width: NookDesign.Size.favicon)
+                    .frame(width: NookDesign.Size.headingIconBox)
             }
             Text(space.name)
                 .foregroundStyle(.secondary)
@@ -76,7 +83,8 @@ struct SpaceSwitcherTitle: View {
                 .nookTrailingFade()
         }
         // Lined up with the favicons of the rows below it.
-        .padding(.horizontal, NookDesign.Spacing.rowPadding)
+        .padding(.leading, NookDesign.Spacing.rowPadding - (hasIcon ? iconOverhang : 0))
+        .padding(.trailing, NookDesign.Spacing.rowPadding)
         .frame(height: NookDesign.Size.row)
         .background(
             NookDesign.Radius.shape(NookDesign.Radius.row)

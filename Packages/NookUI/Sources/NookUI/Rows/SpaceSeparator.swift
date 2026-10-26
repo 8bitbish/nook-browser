@@ -39,6 +39,9 @@ public struct SpaceSeparator: View {
             TimelineView(.animation(paused: !isWaving)) { timeline in
                 WaveLine(
                     amplitude: isWaving ? NookDesign.Size.waveAmplitude : 0,
+                    // The frame's centre falls on a pixel boundary at 2x, which smeared the
+                    // half-point rule over two pixels; Arc's is one.
+                    lift: -NookDesign.Size.separatorWidth / 2,
                     phase: timeline.date.timeIntervalSinceReferenceDate
                         .truncatingRemainder(dividingBy: NookDesign.Motion.wavePeriod)
                         / NookDesign.Motion.wavePeriod * 2 * .pi
@@ -48,10 +51,10 @@ public struct SpaceSeparator: View {
                     style: StrokeStyle(lineWidth: isWaving ? NookDesign.Size.hairlineWidth : NookDesign.Size.separatorWidth, lineCap: .round)
                 )
             }
-            // Arc's rule starts at the title column and stops short of the edge. The caller already
-            // insets this view by `Spacing.md`.
-            .padding(.leading, NookDesign.Spacing.rowPadding + NookDesign.Size.favicon + NookDesign.Spacing.rowIconGap - NookDesign.Spacing.md)
-            .padding(.trailing, NookDesign.Spacing.lg)
+            // Arc's rule spans the rows' content: from the favicon column's left edge to the same
+            // inset on the right (18pt in from each side). The caller already insets this view by
+            // `Spacing.md`.
+            .padding(.horizontal, NookDesign.Spacing.rowPadding - NookDesign.Spacing.md)
             .animation(NookDesign.Motion.settle, value: isWaving)
             .animation(NookDesign.Motion.quick, value: isHovering)
 
@@ -118,6 +121,9 @@ public struct SpaceSeparator: View {
 /// centre line, and at amplitude 0 it is a straight hairline.
 private struct WaveLine: Shape {
     var amplitude: CGFloat
+    /// Moves the line off the frame's centre. Applied in the path because `offset` rounds to
+    /// whole pixels.
+    var lift: CGFloat = 0
     var phase: CGFloat
 
     var animatableData: CGFloat {
@@ -126,18 +132,19 @@ private struct WaveLine: Shape {
     }
 
     func path(in rect: CGRect) -> Path {
+        let midY = rect.midY + lift
         var path = Path()
-        path.move(to: CGPoint(x: rect.minX, y: rect.midY))
+        path.move(to: CGPoint(x: rect.minX, y: midY))
         guard amplitude > 0, rect.width > 0 else {
-            path.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
+            path.addLine(to: CGPoint(x: rect.maxX, y: midY))
             return path
         }
         for x in stride(from: CGFloat(0), through: rect.width, by: 2) {
             let envelope = sin(.pi * x / rect.width)
             let wave = sin(2 * .pi * x / NookDesign.Size.waveLength - phase)
-            path.addLine(to: CGPoint(x: rect.minX + x, y: rect.midY + amplitude * envelope * wave))
+            path.addLine(to: CGPoint(x: rect.minX + x, y: midY + amplitude * envelope * wave))
         }
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: midY))
         return path
     }
 }
