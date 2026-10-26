@@ -764,10 +764,16 @@ class BrowserManager: ObservableObject {
         sidebarContentWidth = max(width - 16, 0)
     }
 
-    func updateSidebarWidth(_ width: CGFloat, for windowState: BrowserWindowState) {
+    /// `live` is a drag in progress: only the window's own state changes, which the sidebar and
+    /// page layout observe. The manager's published copies, which most of the app observes, and
+    /// the saved default follow once the drag ends (`live: false`).
+    func updateSidebarWidth(_ width: CGFloat, for windowState: BrowserWindowState, live: Bool = false) {
         windowState.sidebarWidth = width
         windowState.savedSidebarWidth = width
         windowState.sidebarContentWidth = max(width - 16, 0)
+        guard !live else { return }
+        // The next launch and new windows start at the width last set by hand.
+        defer { userDefaults.set(Double(width), forKey: "sidebarWidth") }
         if windowRegistry?.activeWindow?.id == windowState.id {
             sidebarWidth = width
             savedSidebarWidth = width

@@ -28,7 +28,6 @@ struct SpacesSideBarView: View {
 
     // Space navigation. Keyed by space id: an index outlives the space it pointed at.
     @State private var activeSpaceID: UUID?
-    @State private var activeTabRefreshTrigger: Bool = false
 
     // Hover states
     @State private var isSidebarHovered: Bool = false
@@ -231,8 +230,10 @@ struct SpacesSideBarView: View {
             windowState.spaceSwipe = swipe
         }
         .contentShape(Rectangle())
-        // Pages are cached hosting views; a different set of spaces needs new pages.
-        .id("\(activeTabRefreshTrigger)|\(spaces.map(\.id.uuidString).joined(separator: ","))")
+        // Pages are cached hosting views; a different set of spaces needs new pages. Width is not
+        // part of it: the pages resize with the pager, and rebuilding them on every point of a
+        // sidebar drag made the drag judder and blanked the favourites until they reloaded.
+        .id(spaces.map(\.id.uuidString).joined(separator: ","))
         .onAppear {
             activeSpaceID = windowState.spaceID
             browserManager.prewarmNeighbourSpaces(of: windowState)
@@ -249,9 +250,6 @@ struct SpacesSideBarView: View {
             guard activeSpaceID != newID else { return }
             // A click or shortcut slides the pages across, as a swipe would.
             withAnimation(NookDesign.Motion.spaceSettle) { activeSpaceID = newID }
-        }
-        .onChange(of: windowState.sidebarContentWidth) { _, _ in
-            activeTabRefreshTrigger.toggle()
         }
     }
 
@@ -440,7 +438,7 @@ struct SpacesSideBarView: View {
             .environment(nookSettings)
             .environmentObject(browserManager.gradientColorManager)
             .environmentObject(browserManager.splitManager)
-            .id(space.id.uuidString + "-w\(Int(windowState.sidebarContentWidth))")
+            .id(space.id.uuidString)
             Spacer()
         }
     }
