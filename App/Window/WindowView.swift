@@ -203,7 +203,11 @@ struct WindowView: View {
     private func WindowBackground() -> some View {
         let isActive = windowRegistry.activeWindowId == windowState.id
 
-        SpaceBackdrop(spaceID: windowState.spaceID, swipe: windowState.spaceSwipe, isActive: isActive, accent: accent(of:))
+        // Core Animation draws the colour (see `SpaceBackdropView`); the clear shape on top keeps
+        // the window drag a SwiftUI gesture.
+        Color.clear
+            .contentShape(Rectangle())
+            .background(SpaceBackdropLayer(browserManager: browserManager, window: windowState, isActive: isActive, accent: accent(of:)))
             // Private windows tint all chrome so they are never mistaken for a regular window.
             .overlay(windowState.isIncognito ? NookDesign.Surface.privateTint : Color.clear)
             // So is the Agent space, with its fixed gradient.
@@ -418,50 +422,5 @@ private final class TrafficLightsView: NSView {
         for type in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
             window?.standardWindowButton(type)?.isHidden = !visible || exitingFullScreen
         }
-    }
-}
-
-/// The window's colour, from its own space. A sidebar swipe blends in the colour of the space it
-/// is heading to as far as the swipe has gone, and keeps blending through the settle after the
-/// space has already changed; any other space change cross-fades, so the colour never jumps.
-private struct SpaceBackdrop: View {
-    let spaceID: UUID?
-    let swipe: SpaceSwipe?
-    let isActive: Bool
-    let accent: (UUID?) -> Color
-
-    /// The space the cross-fade starts from; drawn under the current one.
-    @State private var fadingFrom: UUID?
-    @State private var fadeIn: Double = 1
-    /// The space a swipe started from. The selection changes when the fingers lift, so through
-    /// the settle `spaceID` is already the target and this is what the blend comes from.
-    @State private var swipeFrom: UUID?
-
-    var body: some View {
-        ZStack {
-            if let swipe {
-                gradient(swipeFrom ?? spaceID)
-                gradient(swipe.target).opacity(swipe.fraction)
-            } else {
-                gradient(fadingFrom ?? spaceID)
-                gradient(spaceID).opacity(fadeIn)
-            }
-        }
-        .onChange(of: swipe == nil) { _, ended in
-            swipeFrom = ended ? nil : spaceID
-            fadingFrom = nil
-            fadeIn = 1
-        }
-        .onChange(of: spaceID) { old, new in
-            // A swipe carrying the window there already blends toward it.
-            guard old != nil, swipe?.target != new else { return }
-            fadingFrom = old
-            fadeIn = 0
-            withAnimation(NookDesign.Motion.spaceSettle) { fadeIn = 1 }
-        }
-    }
-
-    private func gradient(_ spaceID: UUID?) -> some View {
-        NookDesign.Surface.containerGradient(accent: accent(spaceID), isActive: isActive)
     }
 }
