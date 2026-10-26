@@ -19,13 +19,39 @@ extension View {
         self.environment(\.pageViewSpacing, spacing)
     }
     
+    /// Nook: reports how far a swipe has carried the page view toward a neighbouring page, so
+    /// anything that should move with the swipe can follow the finger (macOS pager only).
+    public func onPageTransition(_ action: @escaping (PageTransition) -> Void) -> some View {
+        self.environment(\.pageTransitionHandler, action)
+    }
+
     /// Specifies the visibility of the background of pages within this view.
     public func pageContentBackground(_ visibility: Visibility) -> some View {
         self.environment(\.contentBackground, visibility)
     }
 }
 
+/// Nook: one step of a swipe between pages.
+public struct PageTransition {
+    /// The page the swipe is heading to; nil once the swipe is over.
+    public let target: AnyHashable?
+    /// 0 at the current page, 1 at `target`.
+    public let fraction: CGFloat
+    /// Set when the pager animates to `fraction` on its own (the settle after the fingers lift),
+    /// so a follower can animate along with it.
+    public let animation: Animation?
+}
+
 extension EnvironmentValues {
+
+    struct PageTransitionKey: EnvironmentKey {
+        static var defaultValue: ((PageTransition) -> Void)? = nil
+    }
+
+    var pageTransitionHandler: ((PageTransition) -> Void)? {
+        get { self[PageTransitionKey.self] }
+        set { self[PageTransitionKey.self] = newValue }
+    }
     
     struct StyleKey: EnvironmentKey {
         static var defaultValue: any PageViewStyle = PlainPageViewStyle()

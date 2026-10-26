@@ -235,7 +235,7 @@ struct SpaceView: View {
                 Image(systemName: "plus")
                     .font(.system(size: NookDesign.Size.favicon, weight: .medium))
                 Text("New Tab")
-                    .font(NookDesign.Font.body)
+                    .font(NookDesign.Font.rowTitle)
                 Spacer(minLength: 0)
                 if isNewTabHovering {
                     Text("⌘T")

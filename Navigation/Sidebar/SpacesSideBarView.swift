@@ -73,7 +73,7 @@ struct SpacesSideBarView: View {
             }
 
             // Header (window controls, nav buttons, URL bar)
-            SidebarHeader(isSidebarHovered: isSidebarHovered, onNewSpace: showSpaceCreationDialog)
+            SidebarHeader(isSidebarHovered: isSidebarHovered)
                 .environmentObject(browserManager)
                 .environment(windowState)
 
@@ -202,11 +202,25 @@ struct SpacesSideBarView: View {
             }
         }
         .pageViewStyle(.scroll)
+        // The window's colour follows the swipe; see `SpaceBackdrop`.
+        .onPageTransition { step in
+            let swipe = (step.target?.base as? UUID).map { SpaceSwipe(target: $0, fraction: Double(step.fraction)) }
+            // The page the swipe heads for starts loading while the fingers are still moving.
+            if let target = swipe?.target, target != windowState.spaceSwipe?.target {
+                browserManager.prewarmSpace(target, in: windowState)
+            }
+            if let animation = step.animation {
+                withAnimation(animation) { windowState.spaceSwipe = swipe }
+            } else {
+                windowState.spaceSwipe = swipe
+            }
+        }
         .contentShape(Rectangle())
         // Pages are cached hosting views; a different set of spaces needs new pages.
         .id("\(activeTabRefreshTrigger)|\(spaces.map(\.id.uuidString).joined(separator: ","))")
         .onAppear {
             activeSpaceID = windowState.spaceID
+            browserManager.prewarmNeighbourSpaces(of: windowState)
             if !spaces.contains(where: { $0.id == windowState.spaceID }) {
                 tabs.setSpace(spaces[0].id, in: windowState)
             }
@@ -215,10 +229,11 @@ struct SpacesSideBarView: View {
             handleSpaceSelectionChange(newID, spaces: spaces)
         }
         .onChange(of: windowState.spaceID) { _, newID in
+            browserManager.prewarmNeighbourSpaces(of: windowState)
             // A swipe already shows this space; rebuilding every page after it stalled the swipe.
             guard activeSpaceID != newID else { return }
-            activeSpaceID = newID
-            activeTabRefreshTrigger.toggle()
+            // A click or shortcut slides the pages across, as a swipe would.
+            withAnimation(NookDesign.Motion.spaceSettle) { activeSpaceID = newID }
         }
         .onChange(of: windowState.sidebarContentWidth) { _, _ in
             activeTabRefreshTrigger.toggle()
@@ -354,6 +369,8 @@ struct SpacesSideBarView: View {
         guard let newID, newID != windowState.spaceID, spaces.contains(where: { $0.id == newID }) else { return }
         // Haptic fires during swipe at 15% offset in PlatformPageView
         tabs.setSpace(newID, in: windowState)
+        // The window now shows the space the swipe blended in; same update, so no frame between.
+        windowState.spaceSwipe = nil
     }
 
     @ViewBuilder
@@ -372,6 +389,14 @@ struct SpacesSideBarView: View {
                 .padding(.horizontal, NookDesign.Spacing.sidebarInset)
                 .padding(.bottom, NookDesign.Spacing.sectionGap)
             }
+
+            // The space's name heads its own page, so it slides with the swipe, as in Arc.
+            SpaceSwitcherTitle(spaceID: space.id, onNewSpace: showSpaceCreationDialog)
+                .environment(tabs)
+                .environment(windowState)
+                .environment(nookSettings)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, NookDesign.Spacing.sidebarInset)
 
             SpaceView(
                 spaceID: space.id,
@@ -394,9 +419,15 @@ struct SpacesSideBarView: View {
         }
     }
 
-    /// Back, forward and reload at the trailing edge, unless the URL bar mode has them.
+    /// Back, forward and reload at the trailing edge, unless the URL bar mode has them. On the
+    /// left the row starts after the traffic lights with the sidebar and AI toggles, as in Arc.
     private var titleRow: some View {
         HStack(spacing: 0) {
+            if nookSettings.sidebarPosition == .left {
+                SidebarToggleButtons()
+                    .environmentObject(browserManager)
+                    .environment(windowState)
+            }
             Spacer(minLength: 0)
             if !nookSettings.topBarAddressView {
                 SidebarHistoryButtons()

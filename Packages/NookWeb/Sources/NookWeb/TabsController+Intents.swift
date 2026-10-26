@@ -273,6 +273,15 @@ extension TabsController {
         }
     }
 
+    /// The tab `setSpace` will select for `spaceID` in `window` when the window remembers one, so
+    /// its page can load before the window gets there. Nil when the space would fall back to its
+    /// first item: opening that early would mark a pinned tab or favorite open for nothing.
+    public func rememberedItem(inSpace spaceID: UUID, in window: BrowserWindowState) -> UUID? {
+        guard let id = window.selectedItemBySpace[spaceID],
+              displayOrder(inSpace: spaceID).contains(id) else { return nil }
+        return id
+    }
+
     public func selectNextSpace(in window: BrowserWindowState) {
         stepSpace(1, in: window)
     }

@@ -3,7 +3,8 @@
 //  SpaceSwitcherTitle.swift
 //  Nook
 //
-//  The current space's name in the traffic-light row. Clicking it lists every space.
+//  A space's name heading its sidebar page, between favorites and pinned tabs, as in Arc.
+//  Clicking it lists every space.
 //
 
 import SwiftUI
@@ -20,10 +21,11 @@ struct SpaceSwitcherTitle: View {
     @ObservedObject private var dragSession = NookDragSessionManager.shared
     @State private var isHovering = false
 
+    let spaceID: UUID
     let onNewSpace: () -> Void
 
     private var currentSpace: SpaceRecord? {
-        windowState.spaceID.flatMap { tabs.space($0) }
+        tabs.space(spaceID)
     }
 
     var body: some View {
@@ -44,7 +46,7 @@ struct SpaceSwitcherTitle: View {
                     .menuStyle(.button)
                     .buttonStyle(.plain)
                     .menuIndicator(.hidden)
-                    // Width may shrink so a long name truncates beside the history buttons.
+                    // Width may shrink so a long name fades out at the sidebar's edge.
                     .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -57,19 +59,22 @@ struct SpaceSwitcherTitle: View {
             if space.isAgent {
                 Image(systemName: "sparkles").foregroundStyle(NookDesign.Surface.agentGradient)
             }
-            Text(space.name).foregroundStyle(.primary)
+            Text(space.name)
         }
-            .font(NookDesign.Font.label)
+            // Dimmer than the rows under it, as in Arc: a heading, not a tab.
+            .foregroundStyle(.secondary)
+            .font(NookDesign.Font.rowHeading)
             .lineLimit(1)
             .fixedSize()
-        // A name too long for the title row fades out, the way a tab row's title does.
+        // A name too long for the sidebar fades out, the way a tab row's title does.
         return ViewThatFits(in: .horizontal) {
             title
             title
                 .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                 .nookTrailingFade()
         }
-        .padding(.horizontal, NookDesign.Spacing.sm)
+        // Lined up with the favicons of the rows below it.
+        .padding(.horizontal, NookDesign.Spacing.rowPadding)
         .frame(height: NookDesign.Size.row)
         .background(
             NookDesign.Radius.shape(NookDesign.Radius.md)

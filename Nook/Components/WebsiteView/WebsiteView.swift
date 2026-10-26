@@ -9,6 +9,7 @@
 import SwiftUI
 import WebKit
 import AppKit
+import OSLog
 import NookDesign
 import NookWeb
 import NookUI
@@ -743,17 +744,41 @@ struct TabCompositorWrapper: NSViewRepresentable {
     /// Sets a single webview as the only content in the container without removing it
     /// if it's already the sole content subview. This prevents GPU video surface
     /// disconnection that causes black flashes during playback.
+    ///
+    /// Swapping one page for another keeps the outgoing page on screen until the incoming one has
+    /// drawn a frame: a page that sat outside the window repaints when it comes back, and showing
+    /// it at once flashed an empty page for that long. The incoming view waits above it at zero
+    /// alpha, which WebKit still counts as visible, so it renders meanwhile.
     private func setSingleWebView(_ desired: NSView, in containerView: NSView, replacing contentSubviews: [NSView]) {
         let isAlreadyCorrect = contentSubviews.count == 1 && contentSubviews.first === desired
+        let container = containerView as? ContainerView
 
         if !isAlreadyCorrect {
-            // Remove stale content views
-            for subview in contentSubviews where subview !== desired {
-                subview.removeFromSuperview()
-            }
-            // Add the desired webview if not already a direct child
-            if desired.superview !== containerView {
+            // The page on screen now: the newest content view that is not still waiting to appear.
+            let outgoing = contentSubviews.last { $0 !== desired && $0 is WKWebView && $0.alphaValue > 0 }
+            removeContentViews(contentSubviews.filter { $0 !== desired && $0 !== outgoing })
+            let isNew = desired.superview !== containerView
+            if isNew {
                 containerView.addSubview(desired)
+            }
+            if let container, let outgoing, let webView = desired as? WKWebView, isNew || desired.alphaValue == 0 {
+                container.swapGeneration += 1
+                let generation = container.swapGeneration
+                let started = ProcessInfo.processInfo.systemUptime
+                webView.alphaValue = 0
+                Self.afterNextPresentation(of: webView) { [weak container, weak webView, weak outgoing] in
+                    guard let container, let webView else { return }
+                    // Taken elsewhere meanwhile (another window, a split pane): never leave it invisible.
+                    guard webView.superview === container else { webView.alphaValue = 1; return }
+                    guard container.swapGeneration == generation else { return }
+                    webView.alphaValue = 1
+                    if let outgoing, outgoing !== webView { outgoing.removeFromSuperview() }
+                    Self.log.notice("page shown \(Int((ProcessInfo.processInfo.systemUptime - started) * 1000), privacy: .public)ms after switch, loading \(webView.isLoading, privacy: .public)")
+                }
+            } else {
+                container?.swapGeneration += 1
+                desired.alphaValue = 1
+                if let outgoing { outgoing.removeFromSuperview() }
             }
         }
 
@@ -762,10 +787,30 @@ struct TabCompositorWrapper: NSViewRepresentable {
         desired.isHidden = false
     }
 
+    private static let log = Logger(subsystem: Bundle.main.bundleIdentifier ?? "Nook", category: "Performance")
+
+    /// Runs `body` once WebKit has put the page's next frame on screen, or after `swapTimeout` for
+    /// a page that is not presenting (an occluded window, a stalled load).
+    private static func afterNextPresentation(of webView: WKWebView, _ body: @escaping () -> Void) {
+        var done = false
+        let once = { if !done { done = true; body() } }
+        let selector = NSSelectorFromString("_doAfterNextPresentationUpdate:")
+        if webView.responds(to: selector) {
+            typealias Call = @convention(c) (AnyObject, Selector, @escaping @convention(block) () -> Void) -> Void
+            unsafeBitCast(webView.method(for: selector), to: Call.self)(webView, selector) { once() }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + swapTimeout) { once() }
+    }
+
+    /// Longest the outgoing page stays up waiting for the incoming one to draw.
+    private static let swapTimeout: TimeInterval = 0.25
+
     /// Removes all non-overlay content subviews
     private func removeContentViews(_ contentSubviews: [NSView]) {
         for subview in contentSubviews {
             subview.removeFromSuperview()
+            // One still waiting to appear in a swap must not stay invisible wherever it goes next.
+            subview.alphaValue = 1
         }
     }
 
@@ -873,6 +918,10 @@ private extension WebsiteView {
 // MARK: - Container View that forwards right-clicks to webviews
 
 private class ContainerView: NSView {
+    /// Bumped on every page swap, so a late "incoming page drew" callback from an earlier swap
+    /// does nothing.
+    var swapGeneration = 0
+
     // A CGColor is frozen at creation; re-resolve it when light/dark changes.
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()

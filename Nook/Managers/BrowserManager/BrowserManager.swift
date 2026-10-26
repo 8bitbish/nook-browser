@@ -563,6 +563,7 @@ class BrowserManager: ObservableObject {
         let selected = windowState.selectedItemID
         if let selected {
             tabs.select(selected, in: windowState)
+            prewarmNeighbourSpaces(of: windowState)
         } else {
             windowState.refreshCompositor()
         }
@@ -602,6 +603,40 @@ class BrowserManager: ObservableObject {
         let finished = await TaskDeadline.wait(for: completion, timeout: .seconds(10))
         completion.cancel()
         return finished
+    }
+
+    // MARK: - Space Warming
+
+    private var spaceWarmTasks: [UUID: Task<Void, Never>] = [:]
+
+    /// Starts loading the page `spaceID` will show in `window`, so arriving there by swipe,
+    /// shortcut or click finds it drawn instead of waiting on the network. Only a page the window
+    /// already remembers for that space; the unload timers treat it like any other loaded page.
+    func prewarmSpace(_ spaceID: UUID, in window: BrowserWindowState) {
+        guard !window.isIncognito, spaceID != window.spaceID, compositorManager.allowsBackgroundWarming,
+              let itemID = tabs.rememberedItem(inSpace: spaceID, in: window),
+              let session = tabs.ensureSession(for: itemID), session.isUnloaded else { return }
+        compositorManager.load(session)
+    }
+
+    /// Once the window's own page has loaded, warms the spaces either side of the one it shows:
+    /// those are where a swipe or the next/previous space shortcut go.
+    func prewarmNeighbourSpaces(of window: BrowserWindowState) {
+        spaceWarmTasks[window.id]?.cancel()
+        spaceWarmTasks[window.id] = Task { @MainActor [weak self, weak window] in
+            do { try await Task.sleep(for: .seconds(1)) } catch { return }
+            guard let self, let window, let spaceID = window.spaceID else { return }
+            // No page yet: the window is still starting up, and startup calls this again. A page
+            // still loading after the wait (a long-polling site) does not hold the warming back.
+            guard let view = self.tabs.selectedSession(in: window)?.webView else { return }
+            _ = await Self.waitForStartupNavigation(view)
+            guard !Task.isCancelled, window.spaceID == spaceID else { return }
+            let spaces = self.tabs.userSpaces(for: window)
+            guard let index = spaces.firstIndex(where: { $0.id == spaceID }) else { return }
+            for neighbour in [index + 1, index - 1] where spaces.indices.contains(neighbour) {
+                self.prewarmSpace(spaces[neighbour].id, in: window)
+            }
+        }
     }
 
     // MARK: - Space Switching

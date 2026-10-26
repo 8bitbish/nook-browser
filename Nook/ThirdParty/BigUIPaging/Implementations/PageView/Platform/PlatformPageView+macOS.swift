@@ -1,22 +1,25 @@
 #if canImport(AppKit)
 
 import SwiftUI
+import NookDesign
 
 // Nook: a trackpad pager of its own instead of NSPageController. The system pager eases each
 // swipe out with its own momentum after the fingers lift; here the lift hands off to a short
-// fixed animation.
+// spring. Progress goes out through `onPageTransition` so the window's colour can follow it.
 extension PlatformPageView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> SwipePagerView {
         let view = SwipePagerView()
         view.coordinator = context.coordinator
         context.coordinator.pager = view
+        context.coordinator.onTransition = context.environment.pageTransitionHandler
         context.coordinator.show(selection)
         return view
     }
 
     func updateNSView(_ view: SwipePagerView, context: Context) {
         context.coordinator.parent = self
+        context.coordinator.onTransition = context.environment.pageTransitionHandler
         context.coordinator.refresh(to: selection, animated: context.transaction.animation != nil)
     }
 
@@ -30,6 +33,7 @@ extension PlatformPageView: NSViewRepresentable {
     final class Coordinator {
         var parent: PlatformPageView
         weak var pager: SwipePagerView?
+        var onTransition: ((PageTransition) -> Void)?
         private(set) var current: SelectionValue?
         private var views: [SelectionValue: HostingView] = [:]
 
@@ -61,13 +65,27 @@ extension PlatformPageView: NSViewRepresentable {
                 return
             }
             guard animated, let pager, let from = current else { return show(value) }
-            let forward = parent.next(from) == value
+            let forward = isAfter(value, from)
             pager.animate(to: view(for: value), forward: forward) { [weak self] in self?.show(value) }
+        }
+
+        /// Whether `value` comes after `from`, so a jump across several pages slides the right way.
+        private func isAfter(_ value: SelectionValue, _ from: SelectionValue) -> Bool {
+            var page = from
+            while let next = parent.next(page) {
+                if next == value { return true }
+                page = next
+            }
+            return false
         }
 
         func neighbour(forward: Bool) -> SelectionValue? {
             guard let current else { return nil }
             return forward ? parent.next(current) : parent.previous(current)
+        }
+
+        func report(_ target: SelectionValue?, _ fraction: CGFloat, animation: Animation? = nil) {
+            onTransition?(PageTransition(target: target.map(AnyHashable.init), fraction: fraction, animation: animation))
         }
 
         func commit(_ value: SelectionValue) {
@@ -84,8 +102,8 @@ extension PlatformPageView: NSViewRepresentable {
         private var incoming: HostingView?
         private var isTracking = false
 
-        private static var settle: TimeInterval { 0.18 }
-        private static var curve: CAMediaTimingFunction { CAMediaTimingFunction(controlPoints: 0.16, 1, 0.3, 1) }
+        /// The settle after the fingers lift, and a programmatic page change.
+        static var settle: Animation { NookDesign.Motion.spaceSettle }
 
         override init(frame: NSRect) {
             super.init(frame: frame)
@@ -160,6 +178,7 @@ extension PlatformPageView: NSViewRepresentable {
                     samples.append((amount, ProcessInfo.processInfo.systemUptime))
                     if samples.count > 4 { samples.removeFirst() }
                     self.setOffset(amount * width, page: page, incoming: target?.view, forward: target?.forward ?? forward)
+                    coordinator.report(target?.value, target?.forward == forward ? abs(amount) : 0)
                     if !playedHaptic, abs(amount) > 0.15 {
                         playedHaptic = true
                         NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
@@ -173,17 +192,20 @@ extension PlatformPageView: NSViewRepresentable {
                             && (abs(amount) > 0.3 || ($0.forward ? velocity < -0.8 : velocity > 0.8))
                     } == true
                     if let target, commits {
+                        coordinator.report(target.value, 1, animation: Self.settle)
                         self.run(to: target.forward ? -width : width, page: page, incoming: target.view, forward: target.forward) {
                             self.isTracking = false
                             coordinator.commit(target.value)
                         }
                     } else {
                         let incoming = target?.view
+                        coordinator.report(target?.value, 0, animation: Self.settle)
                         self.run(to: 0, page: page, incoming: incoming, forward: target?.forward ?? true) {
                             incoming?.removeFromSuperview()
                             self.incoming = nil
                             self.isTracking = false
                             page.frame = self.bounds
+                            coordinator.report(nil, 0)
                         }
                     }
                 default:
@@ -208,12 +230,10 @@ extension PlatformPageView: NSViewRepresentable {
         private func run(to offset: CGFloat, page: NSView, incoming: NSView?, forward: Bool,
                          completion: @escaping () -> Void) {
             let width = bounds.width
-            NSAnimationContext.runAnimationGroup { context in
-                context.duration = Self.settle
-                context.timingFunction = Self.curve
+            NSAnimationContext.animate(Self.settle) {
                 page.animator().frame = bounds.offsetBy(dx: offset, dy: 0)
                 incoming?.animator().frame = bounds.offsetBy(dx: offset + (forward ? width : -width), dy: 0)
-            } completionHandler: {
+            } completion: {
                 MainActor.assumeIsolated { completion() }
             }
         }

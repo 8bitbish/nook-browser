@@ -129,6 +129,10 @@ public class BrowserWindowState {
     /// The space this window shows.
     public var spaceID: UUID?
 
+    /// A sidebar swipe on its way to another space, so the window's colour can follow the
+    /// finger. Nil when no swipe is under way. In memory only.
+    public var spaceSwipe: SpaceSwipe?
+
     /// The selected item per space in this window.
     var selectedItemBySpace: [UUID: UUID] = [:]
 
@@ -164,6 +168,18 @@ public class BrowserWindowState {
     /// Increment the compositor version to trigger UI updates
     public func refreshCompositor() {
         compositorVersion += 1
+    }
+}
+
+/// How far a sidebar swipe has carried a window toward another space.
+public struct SpaceSwipe: Equatable, Sendable {
+    public var target: UUID
+    /// 0 at the current space, 1 at `target`.
+    public var fraction: Double
+
+    public init(target: UUID, fraction: Double) {
+        self.target = target
+        self.fraction = fraction
     }
 }
 

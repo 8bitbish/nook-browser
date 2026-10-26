@@ -58,7 +58,7 @@ public struct TabFolderView: View {
 
                 if isRenaming {
                     TextField("", text: $draftName)
-                        .font(NookDesign.Font.label)
+                        .font(NookDesign.Font.rowHeading)
                         .foregroundStyle(.primary)
                         .textFieldStyle(PlainTextFieldStyle())
                         .autocorrectionDisabled()
@@ -71,7 +71,7 @@ public struct TabFolderView: View {
                         .onEscapeKey { cancelRename() }
                 } else {
                     Text(item.displayTitle)
-                        .font(NookDesign.Font.label)
+                        .font(NookDesign.Font.rowHeading)
                         .foregroundStyle(.primary)
                         .lineLimit(1)
                         .truncationMode(.tail)

@@ -201,11 +201,9 @@ struct WindowView: View {
 
     @ViewBuilder
     private func WindowBackground() -> some View {
-        // Private windows keep the neutral incognito accent, never the space's color.
-        let accent = windowState.isIncognito ? SpaceGradient.incognito.primaryColor : browserManager.gradientColorManager.accentColor
         let isActive = windowRegistry.activeWindowId == windowState.id
 
-        NookDesign.Surface.containerGradient(accent: accent, isActive: isActive)
+        SpaceBackdrop(spaceID: windowState.spaceID, swipe: windowState.spaceSwipe, isActive: isActive, accent: accent(of:))
             // Private windows tint all chrome so they are never mistaken for a regular window.
             .overlay(windowState.isIncognito ? NookDesign.Surface.privateTint : Color.clear)
             // So is the Agent space, with its fixed gradient.
@@ -214,6 +212,16 @@ struct WindowView: View {
             .backgroundDraggable()
             .environment(windowState)
             .animation(NookDesign.Motion.standard, value: isActive)
+    }
+
+    /// A space's colour in this window. Private windows keep the neutral incognito accent, never
+    /// the space's color.
+    private func accent(of spaceID: UUID?) -> Color {
+        if windowState.isIncognito { return SpaceGradient.incognito.primaryColor }
+        guard let hex = spaceID.flatMap({ tabs.space($0) })?.accentHex else {
+            return browserManager.gradientColorManager.accentColor
+        }
+        return SpaceGradient.accent(hex: hex).primaryColor
     }
 
     @ViewBuilder
@@ -412,3 +420,45 @@ private final class TrafficLightsView: NSView {
         }
     }
 }
+
+/// The window's colour, from its own space. A sidebar swipe blends in the colour of the space it
+/// is heading to as far as the swipe has gone, and any other space change cross-fades, so the
+/// colour never jumps.
+private struct SpaceBackdrop: View {
+    let spaceID: UUID?
+    let swipe: SpaceSwipe?
+    let isActive: Bool
+    let accent: (UUID?) -> Color
+
+    /// The space the cross-fade starts from; drawn under the current one.
+    @State private var fadingFrom: UUID?
+    @State private var fadeIn: Double = 1
+    /// The space a finished swipe already shows in full, so arriving there needs no fade.
+    @State private var swipedTo: UUID?
+
+    var body: some View {
+        ZStack {
+            gradient(fadingFrom ?? spaceID)
+            gradient(spaceID).opacity(fadeIn)
+            if let swipe {
+                gradient(swipe.target).opacity(swipe.fraction)
+            }
+        }
+        .onChange(of: swipe) { _, swipe in
+            guard let swipe else { return }
+            swipedTo = swipe.fraction >= 1 ? swipe.target : nil
+        }
+        .onChange(of: spaceID) { old, new in
+            defer { swipedTo = nil }
+            guard old != nil, new != swipedTo else { return }
+            fadingFrom = old
+            fadeIn = 0
+            withAnimation(NookDesign.Motion.spaceSettle) { fadeIn = 1 }
+        }
+    }
+
+    private func gradient(_ spaceID: UUID?) -> some View {
+        NookDesign.Surface.containerGradient(accent: accent(spaceID), isActive: isActive)
+    }
+}
+
