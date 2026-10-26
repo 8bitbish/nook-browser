@@ -291,6 +291,17 @@ extension PageSession: WKNavigationDelegate {
         decidePolicyFor navigationAction: WKNavigationAction,
         decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
     ) {
+        // An extension's page under its Chrome address (an OAuth provider sending the person back
+        // to chrome-extension://<store ID>/…): the same page at its real address, in this view.
+        if let url = navigationAction.request.url, url.scheme?.lowercased() == "chrome-extension" {
+            decisionHandler(.cancel)
+            if navigationAction.targetFrame?.isMainFrame != false, !isPrivate, !isAgentPage,
+               let mapped = controller?.tabEvents?.nativeController?.nookMappedChromeExtensionURL(url) {
+                webView.load(URLRequest(url: mapped))
+            }
+            return
+        }
+
         // mailto:, tel: and app schemes go to the system. A subframe needs a click, so an ad
         // iframe cannot launch an app on its own; a page that was not clicked has to ask.
         if let url = navigationAction.request.url, let scheme = url.scheme?.lowercased(),

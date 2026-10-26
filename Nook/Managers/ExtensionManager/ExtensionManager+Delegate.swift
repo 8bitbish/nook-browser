@@ -326,7 +326,9 @@ extension ExtensionManager {
             completionHandler(nil, Self.noWindowError())
             return
         }
-        let url = configuration.url ?? TabsController.homeURL
+        // The extension's own page under its Chrome address (see `backgroundCompatJS`).
+        let requested = configuration.url ?? TabsController.homeURL
+        let url = controller.nookMappedChromeExtensionURL(requested) ?? requested
         guard Self.extensionMayOpen(url, for: extensionContext) else {
             Self.logger.error("'\(extName, privacy: .public)' tab refused: URL not allowed")
             completionHandler(nil, Self.disallowedURLError(url))
@@ -405,9 +407,10 @@ extension ExtensionManager {
         // A popup of the extension's own pages gets a real window, so the id the extension holds
         // is the popout's and not the browser window's: Bitwarden's unlock popout ends with
         // chrome.windows.remove(id), which used to close the whole browser window.
+        let tabURLs = configuration.tabURLs.map { controller.nookMappedChromeExtensionURL($0) ?? $0 }
         if configuration.windowType == .popup,
-           configuration.tabURLs.count == 1,
-           let url = configuration.tabURLs.first,
+           tabURLs.count == 1,
+           let url = tabURLs.first,
            url.scheme?.lowercased() == extensionContext.baseURL.scheme?.lowercased(),
            Self.extensionMayOpen(url, for: extensionContext),
            let popup = openExtensionPopupWindow(url, configuration: configuration, extensionContext: extensionContext, controller: controller) {
@@ -424,7 +427,7 @@ extension ExtensionManager {
         // data store, so giving one to each extension window would hand its pages an empty cookie
         // jar and move the user out of the space they were working in: an OAuth or FIDO2 popout
         // would lose the session of the very page that asked for it.
-        let urls = configuration.tabURLs.isEmpty ? [TabsController.homeURL] : configuration.tabURLs
+        let urls = tabURLs.isEmpty ? [TabsController.homeURL] : tabURLs
         if let refused = urls.first(where: { !Self.extensionMayOpen($0, for: extensionContext) }) {
             completionHandler(nil, Self.disallowedURLError(refused))
             return

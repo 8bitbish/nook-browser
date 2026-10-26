@@ -87,6 +87,9 @@ extension ExtensionManager {
           // Offscreen documents: the page opens in an extension popup window Nook never shows
           // (the `#nook-offscreen` mark), and is found again after the worker restarts.
           const api = globalThis.chrome;
+          // The extension's real page addresses; `runtime.getURL` may hand out its Chrome form below.
+          const realGetURL = api && api.runtime && api.runtime.getURL ? api.runtime.getURL.bind(api.runtime) : (p => p);
+          const pathOf = url => { try { return new URL(url).pathname; } catch (e) { return String(url); } };
           if (api && api.windows && api.tabs) {
             const mark = '#nook-offscreen';
             const findOffscreen = async () => {
@@ -100,7 +103,7 @@ extension ExtensionManager {
               Reason: new Proxy({}, { get: (_, name) => String(name) }),
               async createDocument({ url }) {
                 if (await findOffscreen()) throw new Error('Only a single offscreen document may be created.');
-                await api.windows.create({ url: api.runtime.getURL(url) + mark, type: 'popup', focused: false });
+                await api.windows.create({ url: realGetURL(pathOf(realGetURL(url))) + mark, type: 'popup', focused: false });
               },
               async closeDocument() {
                 const found = await findOffscreen();
@@ -113,7 +116,8 @@ extension ExtensionManager {
               const found = await findOffscreen();
               if (!found) return [];
               if (filter.contextTypes && !filter.contextTypes.includes('OFFSCREEN_DOCUMENT')) return [];
-              if (filter.documentUrls && !filter.documentUrls.includes(found.url)) return [];
+              // By path: the extension may ask with the Chrome form of its own address.
+              if (filter.documentUrls && !filter.documentUrls.some(u => pathOf(u) === pathOf(found.url))) return [];
               return [{ contextType: 'OFFSCREEN_DOCUMENT', documentUrl: found.url, documentOrigin: found.url.split('/').slice(0, 3).join('/'),
                         windowId: found.windowId, tabId: -1, frameId: 0, incognito: false, contextId: 'nook-offscreen' }];
             };
@@ -203,7 +207,7 @@ extension ExtensionManager {
           if (api && api.tabs && api.tabs.sendMessage && api.runtime && api.runtime.sendMessage) {
             const tabsSend = api.tabs.sendMessage.bind(api.tabs);
             const runtimeSend = api.runtime.sendMessage.bind(api.runtime);
-            const ownPrefix = api.runtime.getURL('');
+            const ownPrefix = realGetURL('');
             put(api.tabs, 'sendMessage', async (tabId, message, options) => {
               let tab = null;
               try { tab = await api.tabs.get(tabId); } catch (e) {}
