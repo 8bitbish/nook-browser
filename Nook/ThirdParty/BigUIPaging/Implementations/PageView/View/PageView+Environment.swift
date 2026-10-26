@@ -37,6 +37,9 @@ public struct PageTransition {
     public let target: AnyHashable?
     /// 0 at the current page, 1 at `target`.
     public let fraction: CGFloat
+    /// Whether `target` comes after the current page, so a follower can bring it in from the
+    /// right side.
+    public let forward: Bool
     /// Set when the pager animates to `fraction` on its own (the settle after the fingers lift),
     /// so a follower can animate along with it.
     public let animation: Animation?

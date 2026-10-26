@@ -218,11 +218,15 @@ struct SpacesSideBarView: View {
         .pageViewStyle(.scroll)
         // The window's colour follows the swipe; see `SpaceBackdrop`.
         .onPageTransition { step in
-            let swipe = (step.target?.base as? UUID).map { SpaceSwipe(target: $0, fraction: Double(step.fraction)) }
+            let swipe = (step.target?.base as? UUID).map {
+                SpaceSwipe(target: $0, fraction: Double(step.fraction), forward: step.forward)
+            }
             // The page the swipe heads for starts loading while the fingers are still moving.
             if let target = swipe?.target, target != windowState.spaceSwipe?.target {
                 browserManager.prewarmSpace(target, in: windowState)
             }
+            // The web page slides with the sidebar page.
+            browserManager.spaceSwipeStep(swipe, animation: step.animation, in: windowState)
             if let animation = step.animation {
                 withAnimation(animation) { windowState.spaceSwipe = swipe }
             } else {
@@ -382,9 +386,10 @@ struct SpacesSideBarView: View {
     private func handleSpaceSelectionChange(_ newID: UUID?, spaces: [SpaceRecord]) {
         guard let newID, newID != windowState.spaceID, spaces.contains(where: { $0.id == newID }) else { return }
         // Haptic fires during swipe at 15% offset in PlatformPageView
+        let started = ProcessInfo.processInfo.systemUptime
         tabs.setSpace(newID, in: windowState)
-        // The window now shows the space the swipe blended in; same update, so no frame between.
-        windowState.spaceSwipe = nil
+        // A swipe lands here as its fingers lift: its page joins the slide as soon as it exists.
+        browserManager.spaceSwipeSelected(in: windowState, setSpaceStarted: started)
     }
 
     @ViewBuilder

@@ -29,6 +29,8 @@ struct SpaceView: View {
     @Environment(\.nookSettings) private var nookSettings
     @ObservedObject private var dragSession = NookDragSessionManager.shared
     @State private var isNewTabHovering = false
+    /// The list has scrolled up under the space heading, which then shows a rule, as in Arc.
+    @State private var isScrolled = false
 
     init(spaceID: UUID, isActive: Bool, isSidebarHovered: Binding<Bool>) {
         self.spaceID = spaceID
@@ -72,6 +74,20 @@ struct SpaceView: View {
             }
             .animation(NookDesign.Motion.standard, value: pinned.isEmpty && !dragSession.isDragging)
             .frame(minWidth: 0, maxWidth: innerWidth, alignment: .leading)
+        }
+        .onScrollGeometryChange(for: Bool.self) { geometry in
+            geometry.contentOffset.y + geometry.contentInsets.top > 0.5
+        } action: { _, scrolled in
+            isScrolled = scrolled
+        }
+        // The rows slide under the heading; the rule marks the edge only while they do.
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(NookDesign.Surface.separator)
+                .frame(height: NookDesign.Size.separatorWidth)
+                .opacity(isScrolled ? 1 : 0)
+                .animation(NookDesign.Motion.quick, value: isScrolled)
+                .allowsHitTesting(false)
         }
         .contentShape(Rectangle())
         .padding(.horizontal, NookDesign.Spacing.sidebarInset)

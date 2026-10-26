@@ -560,6 +560,11 @@ struct TabCompositorWrapper: NSViewRepresentable {
 
         // Store reference to container view in WebViewCoordinator
         browserManager.webViewCoordinator?.setCompositorContainerView(containerView, for: windowState.id)
+        // A swipe holds compositor passes back until its page has settled, then runs one.
+        containerView.spaceSlide.recomposite = { [weak containerView] in
+            guard let containerView else { return }
+            updateCompositor(containerView)
+        }
         
         // Install AppKit drag-capture overlay above all webviews
         let overlay = SplitDropCaptureView(frame: containerView.bounds)
@@ -659,6 +664,13 @@ struct TabCompositorWrapper: NSViewRepresentable {
         // already correctly positioned. Removing a WKWebView from its superview
         // disconnects its GPU video surface, causing black flashes during playback.
 
+        // A space swipe has the pages side by side; it runs this pass once they settle.
+        let slide = (containerView as? ContainerView)?.spaceSlide
+        if let slide, slide.isActive {
+            slide.needsRecomposite = true
+            return
+        }
+
         let tabs = browserManager.tabs
         let selected = tabs.selectedSession(in: windowState)
         let split = browserManager.splitManager
@@ -671,8 +683,12 @@ struct TabCompositorWrapper: NSViewRepresentable {
 
         // Identify overlay (always preserved)
         let overlay = containerView.subviews.compactMap { $0 as? SplitDropCaptureView }.first
-        // Content subviews = everything except the overlay
-        let contentSubviews = containerView.subviews.filter { !($0 is SplitDropCaptureView) }
+        // Content subviews = everything except the overlay, and pages only drawing off to the
+        // side for a swipe's picture (unless one is about to be shown).
+        if let selectedView = selected?.webView { slide?.adopt(selectedView) }
+        let contentSubviews = containerView.subviews.filter {
+            !($0 is SplitDropCaptureView) && !($0 is SnapshotLayerView) && !(slide?.isPrimed($0) ?? false)
+        }
 
         // A drag preview leaves the panes alone; the drop cards draw over them.
         let currentId = selected?.itemID
@@ -766,7 +782,12 @@ struct TabCompositorWrapper: NSViewRepresentable {
                 let generation = container.swapGeneration
                 let started = ProcessInfo.processInfo.systemUptime
                 webView.alphaValue = 0
-                Self.afterNextPresentation(of: webView) { [weak container, weak webView, weak outgoing] in
+                // Its picture is ready for a swipe back to it.
+                if !windowState.isIncognito, let outgoingView = outgoing as? WKWebView,
+                   let outgoingItem = browserManager.tabs.session(for: outgoingView)?.itemID {
+                    PageSnapshotCache.shared.capture(outgoingView, as: outgoingItem)
+                }
+                afterNextPresentation(of: webView) { [weak container, weak webView, weak outgoing] in
                     guard let container, let webView else { return }
                     // Taken elsewhere meanwhile (another window, a split pane): never leave it invisible.
                     guard webView.superview === container else { webView.alphaValue = 1; return }
@@ -788,22 +809,6 @@ struct TabCompositorWrapper: NSViewRepresentable {
     }
 
     private static let log = Logger(subsystem: Bundle.main.bundleIdentifier ?? "Nook", category: "Performance")
-
-    /// Runs `body` once WebKit has put the page's next frame on screen, or after `swapTimeout` for
-    /// a page that is not presenting (an occluded window, a stalled load).
-    private static func afterNextPresentation(of webView: WKWebView, _ body: @escaping () -> Void) {
-        var done = false
-        let once = { if !done { done = true; body() } }
-        let selector = NSSelectorFromString("_doAfterNextPresentationUpdate:")
-        if webView.responds(to: selector) {
-            typealias Call = @convention(c) (AnyObject, Selector, @escaping @convention(block) () -> Void) -> Void
-            unsafeBitCast(webView.method(for: selector), to: Call.self)(webView, selector) { once() }
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + swapTimeout) { once() }
-    }
-
-    /// Longest the outgoing page stays up waiting for the incoming one to draw.
-    private static let swapTimeout: TimeInterval = 0.25
 
     /// Removes all non-overlay content subviews
     private func removeContentViews(_ contentSubviews: [NSView]) {
@@ -917,10 +922,13 @@ private extension WebsiteView {
 
 // MARK: - Container View that forwards right-clicks to webviews
 
-private class ContainerView: NSView {
+private class ContainerView: NSView, SpaceSlideHost {
     /// Bumped on every page swap, so a late "incoming page drew" callback from an earlier swap
     /// does nothing.
     var swapGeneration = 0
+
+    /// The page following a sidebar swipe between spaces.
+    lazy var spaceSlide = SpaceSlide(container: self)
 
     // A CGColor is frozen at creation; re-resolve it when light/dark changes.
     override func viewDidChangeEffectiveAppearance() {

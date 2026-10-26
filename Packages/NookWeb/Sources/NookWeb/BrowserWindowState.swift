@@ -176,10 +176,13 @@ public struct SpaceSwipe: Equatable, Sendable {
     public var target: UUID
     /// 0 at the current space, 1 at `target`.
     public var fraction: Double
+    /// Whether `target` comes after the current space, so its page enters from the right.
+    public var forward: Bool
 
-    public init(target: UUID, fraction: Double) {
+    public init(target: UUID, fraction: Double, forward: Bool = true) {
         self.target = target
         self.fraction = fraction
+        self.forward = forward
     }
 }
 

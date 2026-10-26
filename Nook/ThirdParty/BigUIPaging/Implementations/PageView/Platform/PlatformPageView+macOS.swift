@@ -1,11 +1,14 @@
 #if canImport(AppKit)
 
 import SwiftUI
+import OSLog
 import NookDesign
 
 // Nook: a trackpad pager of its own instead of NSPageController. The system pager eases each
 // swipe out with its own momentum after the fingers lift; here the lift hands off to a short
-// spring. Progress goes out through `onPageTransition` so the window's colour can follow it.
+// spring. Progress goes out through `onPageTransition` so the window's colour and the web page
+// can follow it. The selection changes the moment the fingers lift, not when the spring settles,
+// and a new swipe may start while the last one is still settling.
 extension PlatformPageView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> SwipePagerView {
@@ -53,6 +56,8 @@ extension PlatformPageView: NSViewRepresentable {
 
         /// Shows `value` with no animation and drops pages that are no longer neighbours.
         func show(_ value: SelectionValue) {
+            // A swipe still settling ends first, so its completion cannot land on top of this.
+            pager?.finishSettle()
             current = value
             let keep = Set([value, parent.previous(value), parent.next(value)].compactMap { $0 })
             views = views.filter { keep.contains($0.key) }
@@ -84,12 +89,19 @@ extension PlatformPageView: NSViewRepresentable {
             return forward ? parent.next(current) : parent.previous(current)
         }
 
-        func report(_ target: SelectionValue?, _ fraction: CGFloat, animation: Animation? = nil) {
-            onTransition?(PageTransition(target: target.map(AnyHashable.init), fraction: fraction, animation: animation))
+        func report(_ target: SelectionValue?, _ fraction: CGFloat, forward: Bool = true, animation: Animation? = nil) {
+            // Pages are keyed by a type-erased value; followers get the caller's own (a space id).
+            let value = target.map { target -> AnyHashable in
+                if let erased = target as? PageViewStyleConfiguration.Value { return AnyHashable(erased.wrappedValue) }
+                return AnyHashable(target)
+            }
+            onTransition?(PageTransition(target: value, fraction: fraction, forward: forward, animation: animation))
         }
 
-        func commit(_ value: SelectionValue) {
-            show(value)
+        /// Makes `value` the selection while its page is still settling into place. `current`
+        /// moves first, so the update the binding causes finds nothing to animate.
+        func select(_ value: SelectionValue) {
+            current = value
             parent.selection = value
         }
     }
@@ -101,14 +113,21 @@ extension PlatformPageView: NSViewRepresentable {
         private var page: HostingView?
         private var incoming: HostingView?
         private var isTracking = false
+        /// The spring after a swipe, still running: what to do when it ends, keyed by `settleID` so
+        /// a settle cut short by the next swipe does nothing when its animation reports in.
+        private var pendingSettle: (() -> Void)?
+        private var settleID = 0
 
         /// The settle after the fingers lift, and a programmatic page change.
         static var settle: Animation { NookDesign.Motion.spaceSettle }
+
+        private static var log: Logger { Logger(subsystem: Bundle.main.bundleIdentifier ?? "Nook", category: "SpaceSwipe") }
 
         override init(frame: NSRect) {
             super.init(frame: frame)
             wantsLayer = true
             layer?.masksToBounds = true
+            installTestDriver()
         }
 
         required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -125,15 +144,26 @@ extension PlatformPageView: NSViewRepresentable {
 
         override func layout() {
             super.layout()
-            if !isTracking { page?.frame = bounds }
+            if !isTracking && pendingSettle == nil { page?.frame = bounds }
         }
 
         /// A programmatic change: the new page slides in from its side.
         func animate(to view: HostingView, forward: Bool, completion: @escaping () -> Void) {
+            finishSettle()
             guard let page, !isTracking else { return completion() }
             place(view)
             setOffset(0, page: page, incoming: view, forward: forward)
-            run(to: forward ? -bounds.width : bounds.width, page: page, incoming: view, forward: forward, completion: completion)
+            run(to: forward ? -bounds.width : bounds.width, page: page, incoming: view, forward: forward,
+                animation: Self.settle, completion: completion)
+        }
+
+        /// Ends a settle still under way at once, so the next swipe starts from a page at rest.
+        func finishSettle() {
+            guard let pending = pendingSettle else { return }
+            pendingSettle = nil
+            settleID += 1
+            for view in subviews { view.layer?.removeAllAnimations() }
+            pending()
         }
 
         override func wantsForwardedScrollEvents(for axis: NSEvent.GestureAxis) -> Bool {
@@ -141,69 +171,106 @@ extension PlatformPageView: NSViewRepresentable {
         }
 
         override func scrollWheel(with event: NSEvent) {
-            guard !isTracking,
-                  event.phase == .began,
-                  event.hasPreciseScrollingDeltas,
-                  NSEvent.isSwipeTrackingFromScrollEventsEnabled,
-                  abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY),
-                  let coordinator, let page
+            guard event.phase == .began, event.hasPreciseScrollingDeltas,
+                  abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY)
             else { return super.scrollWheel(with: event) }
+            guard !isTracking, NSEvent.isSwipeTrackingFromScrollEventsEnabled else {
+                Self.log.notice("swipe ignored: \(self.isTracking ? "still tracking" : "swipe tracking off in System Settings", privacy: .public)")
+                return super.scrollWheel(with: event)
+            }
+            guard let swipe = beginSwipe() else { return super.scrollWheel(with: event) }
+
+            // Positive amounts drag the page right, toward the previous space. Past the first or
+            // last space the amount is damped toward 0, which reads as a rubber band.
+            event.trackSwipeEvent(
+                options: [.lockDirection, .clampGestureAmount],
+                dampenAmountThresholdMin: swipe.hasNext ? -1 : 0,
+                max: swipe.hasPrevious ? 1 : 0
+            ) { amount, phase, _, stop in
+                if swipe.step(amount, phase) { stop.pointee = true }
+            }
+        }
+
+        /// One swipe's handler: `step` takes each gesture amount and returns true once the swipe
+        /// is over. Nil when there is nowhere to go.
+        private func beginSwipe() -> (hasPrevious: Bool, hasNext: Bool, step: (CGFloat, NSEvent.Phase) -> Bool)? {
+            // A swipe never waits for the last one's spring, or for any page to load.
+            if pendingSettle != nil {
+                Self.log.notice("swipe began while settling: settle finished early")
+                finishSettle()
+            }
+            guard let coordinator, let page else { return nil }
 
             let previous = coordinator.neighbour(forward: false)
             let next = coordinator.neighbour(forward: true)
-            guard previous != nil || next != nil else { return super.scrollWheel(with: event) }
+            guard previous != nil || next != nil else { return nil }
 
             isTracking = true
             var target: (value: SelectionValue, view: HostingView, forward: Bool)?
             var samples: [(amount: CGFloat, time: TimeInterval)] = []
             var playedHaptic = false
+            var steps = 0
             let width = bounds.width
+            let began = ProcessInfo.processInfo.systemUptime
+            Self.log.notice("swipe began")
 
-            // Positive amounts drag the page right, toward the previous space.
-            event.trackSwipeEvent(
-                options: [.lockDirection, .clampGestureAmount],
-                dampenAmountThresholdMin: next == nil ? 0 : -1,
-                max: previous == nil ? 0 : 1
-            ) { [weak self] amount, phase, _, stop in
-                guard let self else { stop.pointee = true; return }
+            let step: (CGFloat, NSEvent.Phase) -> Bool = { [weak self] amount, phase in
+                guard let self else { return true }
                 let forward = amount < 0
                 if amount != 0, target?.forward != forward, let value = forward ? next : previous {
                     let view = coordinator.view(for: value)
                     target = (value, view, forward)
                     self.place(view)
                 }
+                let elapsed = Int((ProcessInfo.processInfo.systemUptime - began) * 1000)
 
                 switch phase {
                 case .began, .changed:
+                    steps += 1
+                    if steps == 2 { Self.log.notice("swipe moving +\(elapsed, privacy: .public)ms") }
                     samples.append((amount, ProcessInfo.processInfo.systemUptime))
                     if samples.count > 4 { samples.removeFirst() }
                     self.setOffset(amount * width, page: page, incoming: target?.view, forward: target?.forward ?? forward)
-                    coordinator.report(target?.value, target?.forward == forward ? abs(amount) : 0)
+                    coordinator.report(target?.value, target?.forward == forward ? abs(amount) : 0,
+                                       forward: target?.forward ?? forward)
                     if !playedHaptic, abs(amount) > 0.15 {
                         playedHaptic = true
                         NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
                     }
                 case .ended, .cancelled:
-                    // Take over from the system's momentum with a short animation of our own.
-                    stop.pointee = true
+                    // Take over from the system's momentum with a short spring of our own.
+                    self.isTracking = false
                     let velocity = Self.velocity(samples)
+                    // A flick commits however short it was; a slow drag needs to pass a third.
                     let commits = phase == .ended && target.map {
                         $0.forward == (amount < 0)
                             && (abs(amount) > 0.3 || ($0.forward ? velocity < -0.8 : velocity > 0.8))
                     } == true
+                    Self.log.notice("swipe ended +\(elapsed, privacy: .public)ms amount \(String(format: "%.2f", amount), privacy: .public) velocity \(String(format: "%.1f", velocity), privacy: .public)/s steps \(steps, privacy: .public) \(commits ? "commit" : "cancel", privacy: .public)")
                     if let target, commits {
-                        coordinator.report(target.value, 1, animation: Self.settle)
-                        self.run(to: target.forward ? -width : width, page: page, incoming: target.view, forward: target.forward) {
-                            self.isTracking = false
-                            coordinator.commit(target.value)
+                        // Carries the finger's speed into the spring, so a flick keeps going.
+                        let remaining = max(1 - abs(amount), 0.05)
+                        let animation = Animation.interpolatingSpring(
+                            duration: Self.settleDuration, bounce: 0,
+                            initialVelocity: min(abs(velocity) / remaining, 30))
+                        coordinator.report(target.value, 1, forward: target.forward, animation: animation)
+                        // The space changes now: its page is on its way in, and nothing that
+                        // follows the selection waits for the spring.
+                        coordinator.select(target.value)
+                        let released = ProcessInfo.processInfo.systemUptime
+                        self.run(to: target.forward ? -width : width, page: page, incoming: target.view,
+                                 forward: target.forward, animation: animation) {
+                            Self.log.notice("swipe settled \(Int((ProcessInfo.processInfo.systemUptime - released) * 1000), privacy: .public)ms after release")
+                            coordinator.show(target.value)
+                            coordinator.report(nil, 0)
                         }
                     } else {
                         let incoming = target?.view
-                        coordinator.report(target?.value, 0, animation: Self.settle)
-                        self.run(to: 0, page: page, incoming: incoming, forward: target?.forward ?? true) {
+                        coordinator.report(target?.value, 0, forward: target?.forward ?? true, animation: Self.settle)
+                        self.run(to: 0, page: page, incoming: incoming, forward: target?.forward ?? true,
+                                 animation: Self.settle) {
                             incoming?.removeFromSuperview()
-                            self.incoming = nil
-                            self.isTracking = false
+                            if self.incoming === incoming { self.incoming = nil }
                             page.frame = self.bounds
                             coordinator.report(nil, 0)
                         }
@@ -211,8 +278,53 @@ extension PlatformPageView: NSViewRepresentable {
                 default:
                     break
                 }
+                return phase == .ended || phase == .cancelled
+            }
+            return (previous != nil, next != nil, step)
+        }
+
+        // MARK: - Test driver
+
+        /// Hands-off checks: launched with `-NookSwipeTestDriver YES`, the pager plays a scripted
+        /// swipe through the same handler a trackpad drives when told to by the distributed
+        /// notification `com.gstudios.nook.testSwipe` (object "forward|back,<seconds>[,<amount>]").
+        /// Off unless that argument is passed, so an installed app never listens.
+        private var testObserver: NSObjectProtocol?
+
+        private func installTestDriver() {
+            guard UserDefaults.standard.bool(forKey: "NookSwipeTestDriver") else { return }
+            testObserver = DistributedNotificationCenter.default().addObserver(
+                forName: Notification.Name("com.gstudios.nook.testSwipe"), object: nil, queue: .main
+            ) { [weak self] note in
+                let parts = (note.object as? String ?? "forward,0.4").split(separator: ",").map(String.init)
+                let forward = parts.first != "back"
+                let duration = parts.count > 1 ? Double(parts[1]) ?? 0.4 : 0.4
+                let reach = parts.count > 2 ? Double(parts[2]) ?? 0.6 : 0.6
+                MainActor.assumeIsolated { self?.playTestSwipe(forward: forward, duration: duration, reach: reach) }
             }
         }
+
+        private func playTestSwipe(forward: Bool, duration: TimeInterval, reach: CGFloat) {
+            guard !isTracking, let swipe = beginSwipe() else { return }
+            let sign: CGFloat = forward ? -1 : 1
+            let start = ProcessInfo.processInfo.systemUptime
+            var first = true
+            Timer.scheduledTimer(withTimeInterval: 1.0 / 120, repeats: true) { timer in
+                MainActor.assumeIsolated {
+                    let t = min((ProcessInfo.processInfo.systemUptime - start) / duration, 1)
+                    let amount = sign * reach * CGFloat(t)
+                    _ = swipe.step(amount, first ? .began : .changed)
+                    first = false
+                    if t >= 1 {
+                        timer.invalidate()
+                        _ = swipe.step(amount, .ended)
+                    }
+                }
+            }
+        }
+
+        /// `spaceSettle`'s response, for the velocity-carrying spring a release starts.
+        private static var settleDuration: TimeInterval { 0.3 }
 
         private func place(_ view: HostingView) {
             if let incoming, incoming !== view { incoming.removeFromSuperview() }
@@ -228,13 +340,20 @@ extension PlatformPageView: NSViewRepresentable {
         }
 
         private func run(to offset: CGFloat, page: NSView, incoming: NSView?, forward: Bool,
-                         completion: @escaping () -> Void) {
+                         animation: Animation, completion: @escaping () -> Void) {
             let width = bounds.width
-            NSAnimationContext.animate(Self.settle) {
+            settleID += 1
+            let id = settleID
+            pendingSettle = completion
+            NSAnimationContext.animate(animation) {
                 page.animator().frame = bounds.offsetBy(dx: offset, dy: 0)
                 incoming?.animator().frame = bounds.offsetBy(dx: offset + (forward ? width : -width), dy: 0)
             } completion: {
-                MainActor.assumeIsolated { completion() }
+                MainActor.assumeIsolated {
+                    guard self.settleID == id, let pending = self.pendingSettle else { return }
+                    self.pendingSettle = nil
+                    pending()
+                }
             }
         }
 

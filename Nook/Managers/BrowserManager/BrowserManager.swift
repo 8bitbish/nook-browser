@@ -635,9 +635,70 @@ class BrowserManager: ObservableObject {
             guard let index = spaces.firstIndex(where: { $0.id == spaceID }) else { return }
             for neighbour in [index + 1, index - 1] where spaces.indices.contains(neighbour) {
                 self.prewarmSpace(spaces[neighbour].id, in: window)
+                self.primeSwipePicture(of: spaces[neighbour].id, in: window)
             }
         }
     }
+
+    /// Once a neighbouring space's page has loaded, draws it once out of sight and keeps its
+    /// picture, so even a flick there shows the page from its first frame.
+    private func primeSwipePicture(of spaceID: UUID, in window: BrowserWindowState) {
+        guard !window.isIncognito, let itemID = tabs.rememberedItem(inSpace: spaceID, in: window),
+              PageSnapshotCache.shared.image(for: itemID) == nil,
+              let view = tabs.session(for: itemID)?.webView else { return }
+        Task { @MainActor [weak self, weak window] in
+            _ = await Self.waitForStartupNavigation(view)
+            guard let self, let window, window.spaceID != spaceID, view.superview == nil,
+                  let host = self.webViewCoordinator?.compositorContainerView(for: window.id) as? SpaceSlideHost
+            else { return }
+            host.spaceSlide.prime(view, as: itemID)
+        }
+    }
+
+    // MARK: - Space Swipe
+
+    /// One step of a sidebar swipe between spaces: the window's page slides along with it.
+    /// `animation` is set on release, when the swipe settles to 1 (into the space) or 0 (back).
+    func spaceSwipeStep(_ swipe: SpaceSwipe?, animation: Animation?, in window: BrowserWindowState) {
+        let container = webViewCoordinator?.compositorContainerView(for: window.id)
+        guard let host = container as? SpaceSlideHost else {
+            if swipe?.fraction == 0 || animation != nil {
+                Self.swipeLog.notice("page cannot slide: \(container.map { String(describing: type(of: $0)) } ?? "no page container", privacy: .public)")
+            }
+            return
+        }
+        guard let swipe else { return host.spaceSlide.apply(nil) }
+        let itemID = tabs.rememberedItem(inSpace: swipe.target, in: window)
+            ?? tabs.displayOrder(inSpace: swipe.target).first
+        // Only a page that already exists and is free to show here; the swipe never opens one.
+        let session = itemID.flatMap { tabs.session(for: $0) }
+        let webView = session.flatMap { session -> WKWebView? in
+            guard !session.isUnloaded, !tabs.isPageShownElsewhere(session.itemID, from: window) else { return nil }
+            return session.webView
+        }
+        host.spaceSlide.apply(SpaceSlideStep(
+            itemID: itemID,
+            webView: webView,
+            currentItemID: window.selectedItemID,
+            fraction: CGFloat(swipe.fraction),
+            forward: swipe.forward,
+            settles: animation != nil,
+            allowsSnapshots: !window.isIncognito
+        ))
+    }
+
+    /// A swipe just changed the window's space (as the fingers lifted): the page the space
+    /// selected joins the slide, created now if it had none.
+    func spaceSwipeSelected(in window: BrowserWindowState, setSpaceStarted: TimeInterval) {
+        let took = Int((ProcessInfo.processInfo.systemUptime - setSpaceStarted) * 1000)
+        Self.swipeLog.notice("space changed by swipe: setSpace took \(took, privacy: .public)ms on the main thread")
+        guard let host = webViewCoordinator?.compositorContainerView(for: window.id) as? SpaceSlideHost,
+              let session = tabs.selectedSession(in: window),
+              !tabs.isPageShownElsewhere(session.itemID, from: window) else { return }
+        host.spaceSlide.selected(session.webView, itemID: session.itemID)
+    }
+
+    private static let swipeLog = Logger(subsystem: Bundle.main.bundleIdentifier ?? "Nook", category: "SpaceSwipe")
 
     // MARK: - Space Switching
 
