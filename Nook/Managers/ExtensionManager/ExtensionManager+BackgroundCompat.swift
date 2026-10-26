@@ -129,21 +129,77 @@ extension ExtensionManager {
           // never have, so the message went nowhere. NordPass sends its Nord Account sign-in URL
           // to its own login tab this way, and the sign-in stopped after the email. Such a tab
           // gets it through runtime.sendMessage, which reaches the extension's pages.
-          // A short trace of the background's messages to tabs and pages, kept beside
-          // `__nookErrors` as `__nookTrace` (last 40): the message type, where it went and why,
-          // never its contents.
+          // A trace of the background's messages to tabs and pages, its sign-in messages and its
+          // network requests, kept beside `__nookErrors` as `__nookTrace` (last 300): types,
+          // routes, hosts and paths, status codes and error names; never contents, queries or
+          // bodies, and email addresses masked.
           let tracing = Promise.resolve();
           const trace = entry => {
             const store = api && api.storage && api.storage.local;
             if (!store) return;
             const item = { at: new Date().toISOString(), ...entry };
             tracing = tracing.then(() => store.get('__nookTrace')).then(r => {
-              const list = (r.__nookTrace || []).slice(-39);
+              const list = (r.__nookTrace || []).slice(-299);
               list.push(item);
               return store.set({ __nookTrace: list });
             }).catch(() => {});
           };
           const typeOf = message => (message && typeof message === 'object' && typeof message.type === 'string') ? message.type.slice(0, 60) : typeof message;
+          const maskText = value => String(value).replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}/g, '<email>').slice(0, 200);
+          const signIn = type => /^OAUTH\\//.test(type) || type === 'OPEN_NORD_ACCOUNT';
+
+          // Network requests: method, host and path, status or error, duration.
+          if (typeof globalThis.fetch === 'function') {
+            const realFetch = globalThis.fetch.bind(globalThis);
+            globalThis.fetch = async (input, init) => {
+              const raw = typeof input === 'string' ? input : (input && input.url) || String(input);
+              const where = String(raw).split(/[?#]/)[0].slice(0, 120);
+              const method = (init && init.method) || (input && input.method) || 'GET';
+              const started = Date.now();
+              try {
+                const response = await realFetch(input, init);
+                trace({ call: 'fetch', method, url: where, status: response.status, ms: Date.now() - started });
+                return response;
+              } catch (e) {
+                trace({ call: 'fetch', method, url: where, error: maskText(e && (e.name + ': ' + e.message)), ms: Date.now() - started });
+                throw e;
+              }
+            };
+          }
+
+          // Sign-in messages the background receives, and how its handler finishes.
+          if (api && api.runtime && api.runtime.onMessage) {
+            const onMessage = api.runtime.onMessage;
+            const realAdd = onMessage.addListener.bind(onMessage);
+            const realRemove = onMessage.removeListener.bind(onMessage);
+            const wrappers = new Map();
+            put(onMessage, 'addListener', listener => {
+              const wrapped = (message, sender, reply) => {
+                const type = typeOf(message);
+                if (!signIn(type)) return listener(message, sender, reply);
+                const started = Date.now();
+                trace({ call: 'received', type });
+                const replyTraced = value => {
+                  trace({ call: 'replied', type, ms: Date.now() - started,
+                          keys: value && typeof value === 'object' ? Object.keys(value).slice(0, 12) : typeof value,
+                          error: value && value.error ? maskText(value.error.message || value.error) : undefined });
+                  return reply(value);
+                };
+                const result = listener(message, sender, replyTraced);
+                if (result && typeof result.then === 'function') {
+                  result.then(
+                    value => trace({ call: 'resolved', type, ms: Date.now() - started,
+                                     keys: value && typeof value === 'object' ? Object.keys(value).slice(0, 12) : typeof value }),
+                    e => trace({ call: 'rejected', type, ms: Date.now() - started, error: maskText(e && (e.stack || e.message || e)) }));
+                }
+                return result;
+              };
+              wrappers.set(listener, wrapped);
+              return realAdd(wrapped);
+            });
+            put(onMessage, 'removeListener', listener => realRemove(wrappers.get(listener) || listener));
+            put(onMessage, 'hasListener', listener => wrappers.has(listener));
+          }
           if (api && api.tabs && api.tabs.sendMessage && api.runtime && api.runtime.sendMessage) {
             const tabsSend = api.tabs.sendMessage.bind(api.tabs);
             const runtimeSend = api.runtime.sendMessage.bind(api.runtime);

@@ -26,6 +26,8 @@ public final class PageSession: NSObject, Identifiable {
     public let itemID: UUID
     public var id: UUID { itemID }
     @ObservationIgnored static let log = Logger(subsystem: Bundle.main.bundleIdentifier ?? "Nook", category: "PageSession")
+    /// Times `setupWebView` has waited for an extension page's extension to load.
+    @ObservationIgnored private var extensionWaitAttempts = 0
     /// A session in a private window: ephemeral profile, never saved, no extensions.
     public let isPrivate: Bool
 
@@ -298,9 +300,13 @@ public final class PageSession: NSObject, Identifiable {
     /// extension's configuration from the start: with a tab's, the `webkit-extension://` URL does
     /// not resolve and the tab stays blank, titled with the extension's host. Setting it on the
     /// view afterwards does nothing, since `WKWebView.configuration` hands back a copy.
+    private var isExtensionPageURL: Bool {
+        guard !isPrivate, !isAgentPage, let scheme = url.scheme?.lowercased() else { return false }
+        return scheme == "webkit-extension" || scheme == "safari-web-extension"
+    }
+
     private func extensionPageConfiguration() -> WKWebViewConfiguration? {
-        guard !isPrivate, !isAgentPage,
-              let scheme = url.scheme?.lowercased(), scheme == "webkit-extension" || scheme == "safari-web-extension",
+        guard isExtensionPageURL,
               let context = controller?.tabEvents?.nativeController?.extensionContext(for: url)
         else { return nil }
         return context.webViewConfiguration
@@ -311,7 +317,24 @@ public final class PageSession: NSObject, Identifiable {
         defer { BrowserPerformance.signposter.endInterval("WebViewCreation", interval) }
         let resolvedProfile = profile
         let configuration: WKWebViewConfiguration
-        if let extensionPage = extensionPageConfiguration() {
+        let extensionPage = extensionPageConfiguration()
+        // A restored extension page can come up before its extension has loaded. Made with a tab's
+        // configuration it loads without the extension's API and breaks, so it waits for the
+        // extension instead: every half second for up to 10 s, then gives up waiting.
+        if extensionPage == nil, isExtensionPageURL, extensionWaitAttempts < 20 {
+            extensionWaitAttempts += 1
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                guard let self, self.primaryWebView == nil else { return }
+                self.setupWebView()
+                if self.primaryWebView != nil {
+                    for (_, windowState) in self.controller?.windowRegistry.windows ?? [:] {
+                        windowState.refreshCompositor()
+                    }
+                }
+            }
+            return
+        }
+        if let extensionPage {
             configuration = extensionPage
             ExtensionPageDiagnostics.install(on: configuration.userContentController, page: url)
         } else if let resolvedProfile {
