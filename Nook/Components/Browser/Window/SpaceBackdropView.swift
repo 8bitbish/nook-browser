@@ -61,8 +61,6 @@ final class SpaceBackdropView: NSView {
     private var blendID = 0
 
     private static let blendKey = "nook.spaceBlend"
-    /// `spaceSettle`'s response; the sidebar pager settles with the same spring.
-    private static let settleDuration: TimeInterval = 0.3
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -111,6 +109,8 @@ final class SpaceBackdropView: NSView {
             return
         }
         if committedTarget == spaceID || swipeTarget == spaceID { return }
+        // A swipe that settled before the window got there already shows it.
+        if spaceID == baseSpace, (top.presentation()?.opacity ?? top.opacity) == 0 { return }
         crossFade(to: spaceID)
     }
 
@@ -152,8 +152,21 @@ final class SpaceBackdropView: NSView {
 
     // MARK: - Blending
 
+    /// Fades from the colour on screen to `spaceID`'s. Never calls `settleBlend`, which may call
+    /// back here: the two calling each other recursed until the stack ran out.
     private func crossFade(to spaceID: UUID?) {
-        settleBlend()
+        blendID += 1
+        // A blend still under way: whichever colour shows more becomes the base to fade from.
+        let topShowing = (top.presentation()?.opacity ?? top.opacity) >= 0.5
+        let from = topShowing ? topSpace : baseSpace
+        withoutActions {
+            top.removeAnimation(forKey: Self.blendKey)
+            baseSpace = from
+            base.colors = colours(for: from)
+        }
+        swipeTarget = nil
+        committedTarget = nil
+        samples = []
         topSpace = spaceID
         withoutActions {
             top.colors = colours(for: spaceID)
@@ -166,7 +179,9 @@ final class SpaceBackdropView: NSView {
         blendID += 1
         let id = blendID
         let from = top.presentation()?.opacity ?? top.opacity
-        let spring = CASpringAnimation(perceptualDuration: Self.settleDuration, bounce: 0)
+        // The sidebar pager settles with the same spring.
+        let spring = CASpringAnimation(perceptualDuration: NookDesign.Motion.spaceSettleDuration,
+                                       bounce: NookDesign.Motion.spaceSettleBounce)
         spring.keyPath = "opacity"
         spring.fromValue = from
         spring.toValue = opacity
@@ -203,8 +218,19 @@ final class SpaceBackdropView: NSView {
         swipeTarget = nil
         committedTarget = nil
         samples = []
-        // The window moved on while the blend ran (a click during a swipe): catch up.
-        if spaceID != baseSpace, spaceID != nil { crossFade(to: spaceID) }
+        scheduleCatchUp()
+    }
+
+    /// The window moved on while a blend ran (a click during a swipe): fade to where it is. A
+    /// swipe selects its space a turn after the fingers lift, so a settle cut short can end
+    /// before the window has got there; checking a little later keeps that from fading back.
+    private func scheduleCatchUp() {
+        let id = blendID
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+            guard let self, self.blendID == id, self.swipeTarget == nil,
+                  let spaceID = self.spaceID, spaceID != self.baseSpace else { return }
+            self.crossFade(to: spaceID)
+        }
     }
 
     private func recolour() {

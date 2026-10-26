@@ -162,6 +162,19 @@ extension PlatformPageView: NSViewRepresentable {
                 completion: completion)
         }
 
+        /// Share of the width a drag must pass to commit without a flick.
+        private static var dragThreshold: CGFloat { 0.3 }
+        /// Peak speed, in widths per second, at which a release commits however short it was.
+        private static var flickSpeed: CGFloat { 0.4 }
+        /// Shortest flick that counts: below this the fingers barely moved.
+        private static var flickDistance: CGFloat { 0.015 }
+
+        /// How far the page goes for a gesture amount: 85% of the finger at the start, easing to
+        /// 1:1 at a full width, so the swipe has weight without ever lagging behind at the end.
+        private static func travel(_ amount: CGFloat) -> CGFloat {
+            amount * (0.85 + 0.15 * min(abs(amount), 1))
+        }
+
         /// Ends a settle still under way at once, so the next swipe starts from a page at rest.
         func finishSettle() {
             guard let pending = pendingSettle else { return }
@@ -213,6 +226,10 @@ extension PlatformPageView: NSViewRepresentable {
             isTracking = true
             var target: (value: SelectionValue, view: HostingView, forward: Bool)?
             var samples: [(amount: CGFloat, time: TimeInterval)] = []
+            // Fastest the fingers moved each way: a flick slows as it lifts, so its end speed
+            // undersold it and short quick flicks sprang back.
+            var peakForward: CGFloat = 0
+            var peakBack: CGFloat = 0
             var playedHaptic = false
             var steps = 0
             let width = bounds.width
@@ -235,8 +252,13 @@ extension PlatformPageView: NSViewRepresentable {
                     if steps == 2 { Self.log.notice("swipe moving +\(elapsed, privacy: .public)ms") }
                     samples.append((amount, ProcessInfo.processInfo.systemUptime))
                     if samples.count > 4 { samples.removeFirst() }
-                    self.setOffset(amount * width, page: page, incoming: target?.view, forward: target?.forward ?? forward)
-                    coordinator.report(target?.value, target?.forward == forward ? abs(amount) : 0,
+                    let speed = Self.velocity(samples)
+                    peakForward = max(peakForward, -speed)
+                    peakBack = max(peakBack, speed)
+                    // The page trails the fingers a little, more at the start: the swipe has weight.
+                    let travel = Self.travel(amount)
+                    self.setOffset(travel * width, page: page, incoming: target?.view, forward: target?.forward ?? forward)
+                    coordinator.report(target?.value, target?.forward == forward ? abs(travel) : 0,
                                        forward: target?.forward ?? forward)
                     if !playedHaptic, abs(amount) > 0.15 {
                         playedHaptic = true
@@ -246,18 +268,23 @@ extension PlatformPageView: NSViewRepresentable {
                     // Take over from the system's momentum with a short spring of our own.
                     self.isTracking = false
                     let velocity = Self.velocity(samples)
-                    // A flick commits however short it was; a slow drag needs to pass a third.
+                    // A flick commits however short it was, on its peak speed; a slow drag needs
+                    // to pass a third of the way.
                     let commits = phase == .ended && target.map {
-                        $0.forward == (amount < 0)
-                            && (abs(amount) > 0.3 || ($0.forward ? velocity < -0.8 : velocity > 0.8))
+                        let peak = $0.forward ? peakForward : peakBack
+                        return $0.forward == (amount < 0)
+                            && (abs(amount) > Self.dragThreshold
+                                || (peak >= Self.flickSpeed && abs(amount) >= Self.flickDistance))
                     } == true
-                    Self.log.notice("swipe ended +\(elapsed, privacy: .public)ms amount \(String(format: "%.2f", amount), privacy: .public) velocity \(String(format: "%.1f", velocity), privacy: .public)/s steps \(steps, privacy: .public) \(commits ? "commit" : "cancel", privacy: .public)")
+                    Self.log.notice("swipe ended +\(elapsed, privacy: .public)ms amount \(String(format: "%.2f", amount), privacy: .public) velocity \(String(format: "%.1f", velocity), privacy: .public)/s peak \(String(format: "%.1f", max(peakForward, peakBack)), privacy: .public)/s steps \(steps, privacy: .public) \(commits ? "commit" : "cancel", privacy: .public)")
                     if let target, commits {
                         // Carries the finger's speed into the spring, so a flick keeps going.
-                        let remaining = max(1 - abs(amount), 0.05)
-                        let springVelocity = min(abs(velocity) / remaining, 30)
+                        let remaining = max(1 - abs(Self.travel(amount)), 0.05)
+                        let speed = max(abs(velocity), target.forward ? peakForward : peakBack)
+                        let springVelocity = min(speed / remaining, 30)
                         let animation = Animation.interpolatingSpring(
-                            duration: Self.settleDuration, bounce: 0, initialVelocity: springVelocity)
+                            duration: NookDesign.Motion.spaceSettleDuration,
+                            bounce: NookDesign.Motion.spaceSettleBounce, initialVelocity: springVelocity)
                         // The window's page and colour follow first, then the sidebar's spring.
                         coordinator.report(target.value, 1, forward: target.forward, animation: animation)
                         let released = ProcessInfo.processInfo.systemUptime
@@ -331,9 +358,6 @@ extension PlatformPageView: NSViewRepresentable {
             RunLoop.main.add(timer, forMode: .common)
         }
 
-        /// `spaceSettle`'s response, for the velocity-carrying spring a release starts.
-        private static var settleDuration: TimeInterval { 0.3 }
-
         private func place(_ view: HostingView) {
             if let incoming, incoming !== view { incoming.removeFromSuperview() }
             incoming = view
@@ -375,7 +399,8 @@ extension PlatformPageView: NSViewRepresentable {
                 view.frame = frame
                 let to = layer.position
                 guard from != to else { continue }
-                let spring = CASpringAnimation(perceptualDuration: Self.settleDuration, bounce: 0)
+                let spring = CASpringAnimation(perceptualDuration: NookDesign.Motion.spaceSettleDuration,
+                                               bounce: NookDesign.Motion.spaceSettleBounce)
                 spring.keyPath = "position"
                 spring.fromValue = NSValue(point: from)
                 spring.toValue = NSValue(point: to)

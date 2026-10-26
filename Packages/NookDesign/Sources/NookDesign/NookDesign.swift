@@ -162,9 +162,13 @@ public enum NookDesign {
         public static let flight = Animation.easeIn(duration: 0.6)       // a download flying from the page to its button
         public static let spring = Animation.snappy(duration: 0.3)      // palette, dialog, toast, drag reorder, gesture-tracked motion
         /// A space change: the sidebar page settling after a swipe, a programmatic page slide, and
-        /// the window colour blending with either. Critically damped, so the page never overshoots
-        /// into the empty space past the last one.
-        public static let spaceSettle = Animation.spring(response: 0.3, dampingFraction: 1)
+        /// the window colour blending with either. The bounce is small enough that the page never
+        /// shows more than a sliver past the last one.
+        public static let spaceSettle = Animation.spring(duration: spaceSettleDuration, bounce: spaceSettleBounce)
+        /// `spaceSettle` for Core Animation springs (the sidebar pages, the window colour): a
+        /// touch longer than a snap and a hint of bounce, so a swipe lands with some weight.
+        public static let spaceSettleDuration: TimeInterval = 0.36
+        public static let spaceSettleBounce: Double = 0.04
     }
 
     // MARK: - Surface
