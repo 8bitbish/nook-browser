@@ -560,11 +560,6 @@ struct TabCompositorWrapper: NSViewRepresentable {
 
         // Store reference to container view in WebViewCoordinator
         browserManager.webViewCoordinator?.setCompositorContainerView(containerView, for: windowState.id)
-        // A swipe holds compositor passes back until its page has settled, then runs one.
-        containerView.spaceSlide.recomposite = { [weak containerView] in
-            guard let containerView else { return }
-            updateCompositor(containerView)
-        }
         
         // Install AppKit drag-capture overlay above all webviews
         let overlay = SplitDropCaptureView(frame: containerView.bounds)
@@ -664,12 +659,7 @@ struct TabCompositorWrapper: NSViewRepresentable {
         // already correctly positioned. Removing a WKWebView from its superview
         // disconnects its GPU video surface, causing black flashes during playback.
 
-        // A space swipe has the pages side by side; it runs this pass once they settle.
-        let slide = (containerView as? ContainerView)?.spaceSlide
-        if let slide, slide.isActive {
-            slide.needsRecomposite = true
-            return
-        }
+        let swipePage = (containerView as? ContainerView)?.spaceSwipePage
 
         let tabs = browserManager.tabs
         let selected = tabs.selectedSession(in: windowState)
@@ -684,10 +674,10 @@ struct TabCompositorWrapper: NSViewRepresentable {
         // Identify overlay (always preserved)
         let overlay = containerView.subviews.compactMap { $0 as? SplitDropCaptureView }.first
         // Content subviews = everything except the overlay, and pages only drawing off to the
-        // side for a swipe's picture (unless one is about to be shown).
-        if let selectedView = selected?.webView { slide?.adopt(selectedView) }
+        // side for a picture or a swipe (unless one is about to be shown).
+        if let selectedView = selected?.webView { swipePage?.adopt(selectedView) }
         let contentSubviews = containerView.subviews.filter {
-            !($0 is SplitDropCaptureView) && !($0 is SnapshotLayerView) && !(slide?.isPrimed($0) ?? false)
+            !($0 is SplitDropCaptureView) && !($0 is SnapshotLayerView) && !(swipePage?.isParked($0) ?? false)
         }
 
         // A drag preview leaves the panes alone; the drop cards draw over them.
@@ -922,13 +912,13 @@ private extension WebsiteView {
 
 // MARK: - Container View that forwards right-clicks to webviews
 
-private class ContainerView: NSView, SpaceSlideHost {
+private class ContainerView: NSView, SpaceSwipeHost {
     /// Bumped on every page swap, so a late "incoming page drew" callback from an earlier swap
     /// does nothing.
     var swapGeneration = 0
 
-    /// The page following a sidebar swipe between spaces.
-    lazy var spaceSlide = SpaceSlide(container: self)
+    /// The next space's page during a sidebar swipe between spaces.
+    lazy var spaceSwipePage = SpaceSwipePage(container: self)
 
     // A CGColor is frozen at creation; re-resolve it when light/dark changes.
     override func viewDidChangeEffectiveAppearance() {

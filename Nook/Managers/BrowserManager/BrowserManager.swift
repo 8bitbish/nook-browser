@@ -649,25 +649,20 @@ class BrowserManager: ObservableObject {
         Task { @MainActor [weak self, weak window] in
             _ = await Self.waitForStartupNavigation(view)
             guard let self, let window, window.spaceID != spaceID, view.superview == nil,
-                  let host = self.webViewCoordinator?.compositorContainerView(for: window.id) as? SpaceSlideHost
+                  let host = self.webViewCoordinator?.compositorContainerView(for: window.id) as? SpaceSwipeHost
             else { return }
-            host.spaceSlide.prime(view, as: itemID)
+            host.spaceSwipePage.prime(view, as: itemID)
         }
     }
 
     // MARK: - Space Swipe
 
-    /// One step of a sidebar swipe between spaces: the window's page slides along with it.
-    /// `animation` is set on release, when the swipe settles to 1 (into the space) or 0 (back).
+    /// One step of a sidebar swipe between spaces. The page stays put while the fingers move; the
+    /// next space's page draws out of sight meanwhile and goes on screen the moment the swipe
+    /// commits. `animation` is set on release: the settle to 1 (commit) or back to 0.
     func spaceSwipeStep(_ swipe: SpaceSwipe?, animation: Animation?, in window: BrowserWindowState) {
-        let container = webViewCoordinator?.compositorContainerView(for: window.id)
-        guard let host = container as? SpaceSlideHost else {
-            if swipe?.fraction == 0 || animation != nil {
-                Self.swipeLog.notice("page cannot slide: \(container.map { String(describing: type(of: $0)) } ?? "no page container", privacy: .public)")
-            }
-            return
-        }
-        guard let swipe else { return host.spaceSlide.apply(nil) }
+        guard let host = webViewCoordinator?.compositorContainerView(for: window.id) as? SpaceSwipeHost else { return }
+        guard let swipe else { return host.spaceSwipePage.apply(nil) }
         let itemID = tabs.rememberedItem(inSpace: swipe.target, in: window)
             ?? tabs.displayOrder(inSpace: swipe.target).first
         // Only a page that already exists and is free to show here; the swipe never opens one.
@@ -676,26 +671,22 @@ class BrowserManager: ObservableObject {
             guard !session.isUnloaded, !tabs.isPageShownElsewhere(session.itemID, from: window) else { return nil }
             return session.webView
         }
-        host.spaceSlide.apply(SpaceSlideStep(
+        host.spaceSwipePage.apply(SpaceSwipeStep(
             itemID: itemID,
             webView: webView,
             currentItemID: window.selectedItemID,
-            fraction: CGFloat(swipe.fraction),
-            forward: swipe.forward,
-            settles: animation != nil,
+            release: animation == nil ? nil : swipe.fraction >= 1,
             allowsSnapshots: !window.isIncognito
         ))
     }
 
-    /// A swipe just changed the window's space (as the fingers lifted): the page the space
-    /// selected joins the slide, created now if it had none.
+    /// A swipe just changed the window's space (as the fingers lifted). A picture shown at
+    /// release gives way to the page the space selected once that page has drawn.
     func spaceSwipeSelected(in window: BrowserWindowState, setSpaceStarted: TimeInterval) {
         let took = Int((ProcessInfo.processInfo.systemUptime - setSpaceStarted) * 1000)
         Self.swipeLog.notice("space changed by swipe: setSpace took \(took, privacy: .public)ms on the main thread")
-        guard let host = webViewCoordinator?.compositorContainerView(for: window.id) as? SpaceSlideHost,
-              let session = tabs.selectedSession(in: window),
-              !tabs.isPageShownElsewhere(session.itemID, from: window) else { return }
-        host.spaceSlide.selected(session.webView, itemID: session.itemID)
+        guard let host = webViewCoordinator?.compositorContainerView(for: window.id) as? SpaceSwipeHost else { return }
+        host.spaceSwipePage.selected(tabs.selectedSession(in: window)?.webView)
     }
 
     private static let swipeLog = Logger(subsystem: Bundle.main.bundleIdentifier ?? "Nook", category: "SpaceSwipe")

@@ -225,7 +225,7 @@ struct SpacesSideBarView: View {
             if let target = swipe?.target, target != windowState.spaceSwipe?.target {
                 browserManager.prewarmSpace(target, in: windowState)
             }
-            // The web page slides with the sidebar page.
+            // The next space's page gets ready out of sight and shows the moment the swipe commits.
             browserManager.spaceSwipeStep(swipe, animation: step.animation, in: windowState)
             if let animation = step.animation {
                 withAnimation(animation) { windowState.spaceSwipe = swipe }
